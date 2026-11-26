@@ -1,0 +1,77 @@
+{
+  "format": "shaderous-setup",
+  "version": 1,
+  "id": "ehep",
+  "name": "Escape of detonation products",
+  "group": "Shocks and blasts",
+  "family": "fickett",
+  "familyName": "Piston-driven detonation",
+  "variant": "Escape of products (EHEP)",
+  "blurb": "The escape of detonation products (Fickett and Rivard 1974; ExactPack’s ehep): a piston at 0.05 drove a detonation (gamma = 3, CJ speed 0.85, density 1.6) through 1 unit of explosive, beyond which is vacuum. The run starts from the exact solution at t = 1.2, just after the detonation reached the end: the products escape into the vacuum at up to 0.85, and a rarefaction runs back to the piston, reaching it at t = 3.16, and reflects from it. Every region of the flow is in closed form. It ends at t = 4.2 of the solution.",
+  "domain": {
+    "ndim": 2,
+    "n": 512,
+    "box": 4,
+    "supports2d": true,
+    "bc": {
+      "lo": [2, 2, 0],
+      "hi": [1, 2, 0]
+    }
+  },
+  "physics": {
+    "eos": "ideal",
+    "eosParams": {
+      "gamma": 3
+    },
+    "gravity": "off",
+    "G": 0,
+    "floors": {
+      "rho": 1e-8,
+      "p": 1e-14
+    }
+  },
+  "parts": [
+    {
+      "kind": "flow",
+      "name": "ehep-escape",
+      "D": 0.85,
+      "rho0": 1.6,
+      "up": 0.05,
+      "at": 0.2,
+      "length": 1,
+      "start": 1.02,
+      "vacuum": 0.000001
+    },
+    {
+      "kind": "obstacle",
+      "id": "piston",
+      "shape": {
+        "type": "box",
+        "min": [
+          null,
+          null,
+          null
+        ],
+        "max": [
+          -1.74,
+          null,
+          null
+        ]
+      },
+      "motion": {
+        "slide": {
+          "velocity": [0.05, 0, 0]
+        }
+      }
+    }
+  ],
+  "run": {
+    "tEnd": 3,
+    "checkpointDt": 0.3
+  },
+  "view": {
+    "field": 0,
+    "log": false,
+    "mode": "slice"
+  }
+}

@@ -915,7 +915,7 @@ export function sphericalUnsupported(c: SimConfig): string | null {
   if (c.problem.rotation || c.problem.shear || c.problem.cosmology || c.problem.frame) return 'a spherical run has no rotating or accelerating frame, shear or expansion';
   if ((c.symmetry ?? []).some(Boolean)) return 'mirror symmetry is not available in spherical runs (both poles are in the grid)';
   if (uniformField(c).some((g) => g !== 0)) return 'a uniform field is not available in spherical runs';
-  if (c.driving.accel > 0 || c.problem.damping) return 'driving and damping zones are not available in spherical runs';
+  if (c.driving.accel > 0 || (c.problem.damping && !c.problem.damping.spherical)) return 'driving and damping zones are not available in spherical runs';
   if (c.gravity === 'periodic') return 'a spherical run\u2019s self-gravity is its monopole (isolated), not periodic';
   if (c.problem.debris) return 'debris tallies are not available in spherical runs';
   if (c.problem.burn) return 'burning is not available in spherical runs';
@@ -1113,7 +1113,7 @@ export function rotationOf(c: SimConfig): [number, number, number, number] {
 /** The run is in a rotating frame. */
 export const rotating = (c: SimConfig): boolean => rotationOf(c).some((x) => x !== 0);
 
-const NO_DAMPING = 'const DAMPING = false;\nfn damping_target(x: vec3<f32>) -> DampTarget { return DampTarget(0.0, 1.0, vec3<f32>(0.0), 1.0); }\n';
+const NO_DAMPING = 'const DAMPING = false;\nfn damping_target(x: vec3<f32>, t: f32) -> DampTarget { return DampTarget(0.0, 1.0, vec3<f32>(0.0), 1.0); }\n';
 
 /** Thermal conduction is on: it needs a coefficient and an equation of state with an energy. */
 export const conducts = (c: SimConfig): boolean => c.conductivity > 0 && eosHasEnergy(c.eos);
@@ -3268,7 +3268,7 @@ export class Sim implements Simulation {
         })
       : undefined;
     if (stencil && this.cfg.problem.damping) {
-      this.dampProbe ??= DampProbe.create(this.device, hydroSlots(this.cfg), this.params);
+      this.dampProbe ??= DampProbe.create(this.device, hydroSlots(this.cfg), this.params, this.clock);
       stencil.damp = await (await this.dampProbe).at(pos, this.dx);
     }
     return { pos, index: this.nz === 1 ? index.slice(0, 2) : index, dx: this.dx, u1: [...u1], u2: [...u2], stencil };

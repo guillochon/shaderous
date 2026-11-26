@@ -37,7 +37,8 @@
       "symmetry": 2,
       "speed": 1,
       "rho": 1,
-      "p": 0.000001
+      "p": 0.000001,
+      "hold": true
     }
   ],
   "run": {

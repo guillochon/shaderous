@@ -637,7 +637,7 @@ held bit for bit to the object it replaced before those objects were retired.
   their float64 mirrors and analytic limits, white dwarf structure and the collision orbit, the
   exact Riemann solver, the float64 reference scheme, the AMR tree, links, units and checkpoints.
 - **GPU tests** (`npm run test:gpu`): Playwright drives an installed Chrome (or Edge with
-  `PW_CHANNEL=msedge`) through the 221-test validation suite on the real GPU. Each test closes
+  `PW_CHANNEL=msedge`) through the 223-test validation suite on the real GPU. Each test closes
   its page, bounded to 30 s, before its result is judged, and a global timeout (180 minutes,
   `PW_GLOBAL_TIMEOUT`) runs in the runner process, so a failed test cannot hold the suite. The
   specs take `test` from `tests/gpu/fixtures.ts`, whose browser fixture closes Chrome through

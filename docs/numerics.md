@@ -1660,6 +1660,19 @@ disk grew until its uneven pull pushed the binary out of the box.
 With a magnetic field (the magnetized accretion disk) the zone acts on the gas alone: B^2 / 2 is
 taken out of E before it and put back after, and the field is left to the induction equation.
 
+**Faces held at an exact solution** (the Noh, uniform-collapse and Coggeshall presets). A
+zone's target is a function of position and of time, the end of the step, so a flow with an
+exact solution can supply one (`FlowDef.damping`, `setup/parts/flows/converging.ts`). The three
+cells next to each open face then relax at a rate of $`10^{30}`$, that is, are set to the
+solution at the end of every step. That is a Dirichlet boundary built from the zone, with no
+change to the loaders, on the uniform grid and on blocks. A converging flow needs it: an open
+face copies the cell inside it, and cannot push gas in as the gas beyond the box would.
+Without it, a rarefaction from the faces of the uniform collapse reached the center by
+$`t = 0.3`$, and in the Cartesian Noh implosion the gas coming in formed dense sheets along the
+axes that reached the shock. Such a zone also runs in spherical (r, θ) runs, which refuse the
+disk's and the tunnel's: it takes their positions and velocities as (r, θ) and
+$`(v_r, v_	heta, v_\phi)`$.
+
 **Turbulence driving** (`hydro/drive.ts`, `hydro/drive.wgsl`, `hydro/drive_ou.wgsl`; the
 driven-turbulence presets). A random acceleration stirs the gas at the largest scales: the
 Ornstein-Uhlenbeck forcing of [Eswaran & Pope (1988)][EP88], with the solenoidal and
@@ -3031,7 +3044,7 @@ bound, and the rate grew with it.
 
 ## 23. Validation
 
-The validation suite (`src/validation/tests.ts`) has 221 tests. It runs on your own GPU at
+The validation suite (`src/validation/tests.ts`) has 223 tests. It runs on your own GPU at
 [validate.html](https://guillochon.github.io/shaderous/validate.html) or with
 `npm run test:gpu`. Reference solutions come from a float64 CPU implementation of the same
 scheme (`src/reference/hydro.ts`) and an exact Riemann solver ([Toro 2009][Toro2009],
@@ -3048,9 +3061,10 @@ implicit pressure for the liquid and the gas (§9), the MHD tests of §21, the f
 coordinates of §22, radiation transport (§24), and the ANEOS materials, a planet at rest and
 the moon-forming impact (§25). Each test's pass criterion is printed next to its result.
 
-Four tests (`src/validation/exact.ts`) check presets against closed-form solutions from
+Six tests (`src/validation/exact.ts`) check presets against closed-form solutions from
 ExactPack, Los Alamos's suite of exact solutions. Their formulas are in
-`src/reference/converging.ts`, with the Riemann problems taken from the exact solver above:
+`src/reference/converging.ts`, with the Riemann problems taken from the exact solver above, and
+unit tests check that each one satisfies the Euler equations and its jump conditions:
 
 - **Riemann problems** (`riemann-*` presets, at $`256^2`$): Einfeldt's 1-2-3 with its
   near-vacuum, Toro's stationary contact, Quirk's slow shock, shock-contact-shock and LeBlanc's
@@ -3060,26 +3074,44 @@ ExactPack, Los Alamos's suite of exact solutions. Their formulas are in
   table gives the slow shock's left density as 1 and the stationary contact's right pressure
   as 0.02, where the tests have 3.857143 and 0.01.
 - **Noh implosion** ([Noh 1987][Noh1987]; `noh-*` presets, the `noh` flow, $`\gamma = 5/3`$,
-  $`t = 0.6`$, at $`256^2`$). Planar: post-shock density 4.000 of 4. Cylindrical (R, z):
-  15.76 of 16. Spherical (r, θ): 61.3 of 64, with the wall heating at the center left out of
-  the average. In all three the shock is within 0.85 cells of $`r = 0.2`$, and the pre-shock
-  density within $`2	imes10^{-5}`$ of $`(1 + t/r)^{k-1}`$. On a 2D Cartesian grid
-  ([Liska & Wendroff 2003][Liska2003]) it gets 15.89 of 16, with the shock within 0.33 cells
-  of round along the axes and the diagonal. Its box is of side 2: through open faces, which
-  cannot supply the converging gas the exact solution has outside the box, the inflowing gas
-  forms dense sheets along the axes, which in a box of side 1 reach the shock by $`t = 0.6`$.
+  $`t = 0.6`$, at $`256^2`$, the open faces held at the exact solution as in §19). Planar:
+  post-shock density 4.000 of 4. Cylindrical (R, z): 15.76 of 16. Spherical (r, θ): 61.3 of
+  64, with the wall heating at the center left out of the average. In all three the shock is
+  within 0.85 cells of $`r = 0.2`$, and the pre-shock density within $`10^{-5}`$ of
+  $`(1 + t/r)^{k-1}`$ in L1 out to the held cells. On a 2D Cartesian grid
+  ([Liska & Wendroff 2003][Liska2003]) it gets 15.89 of 16, with the shock within 0.33 cells of
+  round along the axes and the diagonal.
 - **Uniform collapse** (ExactPack's noh2; `uniform-collapse-*` presets, the
   `uniform-collapse` flow): $`u = -r/(1 - t)`$, with the density and the specific internal
-  energy uniform along the adiabat. At $`t = 0.5`$ the L1 error in density, pressure and
-  velocity is at most $`2	imes10^{-5}`$ planar, $`6	imes10^{-5}`$ cylindrical and
-  $`10^{-3}`$ spherical. The comparison covers only the part of the box that the open outer
-  face's rarefaction has not reached. That rarefaction moves inward at the sound speed, through
-  $`c_0\,((1-t)^{-a} - 1)/a`$ in $`r/(1-t)`$ with $`a = (\gamma - 1)k/2`$, so the presets reach
-  out to $`r = 3`$.
-
-Holding the outer face at the exact solution would remove both limits. That is for a later
-change, together with the problems that need new code: Mader's detonation, the escape of
-explosive products, and Coggeshall's similarity solutions.
+  energy uniform along the adiabat. At $`t = 0.6`$, with the outer faces held, the L1 error in
+  density, pressure and velocity is at most $`2.5	imes10^{-6}`$ planar, $`6.6	imes10^{-6}`$
+  cylindrical and $`5.5	imes10^{-5}`$ spherical.
+- **Coggeshall's similarity solutions** ([Coggeshall 1991][Coggeshall1991]; `coggeshall-*`
+  presets and flows, spherical, both radial faces held): problem 1, free homologous expansion
+  with a uniform pressure; problem 2, homologous expansion against a pressure rising outward;
+  problem 6, Kidder's isentropic compression ($`\gamma = 5/3`$), to 0.6 of the starting radii.
+  L1 errors are at most $`10^{-4}`$, $`1.4	imes10^{-4}`$ and $`5	imes10^{-5}`$. Problems 1
+  and 2 are singular at $`t = 0`$, so their runs start at $`t_0 = 1`$ of the solution. The other
+  Euler-only problems need $`\gamma < 1`$ or a negative temperature (3, 4, 5), or are the Noh
+  problem again (19). Problem 20, Noh with a uniform collapse added, is not consistent as
+  ExactPack codes it: with its default $`u_0 = +2.3`$ the pre-shock density factor
+  $`((r - u_0 t)/r)^k`$ goes negative between the shock and $`r = u_0 t`$, and with
+  $`u_0 < 0`$ there is no shock. The rest need heat conduction with power-law conductivities.
+- **Piston-driven detonations** (Fickett & Davis 1979, Fickett & Rivard 1974; the `mader` and
+  `ehep` presets, $`\gamma = 3`$, at $`512^2`$). Mader's problem is a slab of explosive
+  detonated from a wall at rest. Its exact solution burns instantly at the Chapman-Jouguet
+  state; here a fast Arrhenius burn stands in, its reaction zone far thinner than a cell, and
+  the run starts from the exact solution at 0.25 μs. Cells flagged as shocks do not burn, so
+  the detonation keeps a von Neumann spike and starts 7.5 cells behind. Over the second half of
+  the run it moves at 0.805 against the CJ speed of 0.8, and behind it the Taylor wave and the
+  products at rest are within 1.7% (density) and 1.8% (pressure) in L1. Burning in shocked
+  cells instead let the front outrun the box, as [Colella et al. (1986)][Colella1986] predict
+  for unresolved fronts. The escape of the products (EHEP) starts from its exact solution once
+  the explosive is all burned: a moving piston, an obstacle, cannot carry the species a burn
+  needs. The products escape into vacuum and a rarefaction runs back and reflects from the
+  piston; at the end the density is within 1.3%, the pressure 3.2% (it goes as
+  $`
+ho^3`$), and the velocity 0.17% of the CJ speed.
 
 ## 24. Radiation transport
 
@@ -3788,6 +3820,8 @@ two levels of blocks (the test's threshold is 1e-4).
 [Plummer1911]: https://doi.org/10.1093/mnras/71.5.460
 [Quirk1994]: https://doi.org/10.1002/fld.1650180603
 [Noh1987]: https://doi.org/10.1016/0021-9991(87)90074-X
+[Coggeshall1991]: https://doi.org/10.1063/1.858008
+[Colella1986]: https://doi.org/10.1137/0907073
 [Liska2003]: https://doi.org/10.1137/S1064827502402120
 [Roe1986]: https://doi.org/10.1146/annurev.fl.18.010186.002005
 [Ross2011]: https://arxiv.org/abs/1011.0686
@@ -3864,6 +3898,10 @@ two levels of blocks (the test's threshold is 1e-4).
 - Plewa, T., & Müller, E. (1999). The consistent multi-fluid advection method. A&A 342, 179. [arXiv:astro-ph/9807241](https://arxiv.org/abs/astro-ph/9807241)
 - Plummer, H. C. (1911). On the problem of distribution in globular star clusters. MNRAS 71, 460. [doi:10.1093/mnras/71.5.460](https://doi.org/10.1093/mnras/71.5.460)
 - Quirk, J. J. (1994). A contribution to the great Riemann solver debate. International Journal for Numerical Methods in Fluids 18, 555. [doi:10.1002/fld.1650180603](https://doi.org/10.1002/fld.1650180603)
+- Colella, P., Majda, A., & Roytburd, V. (1986). Theoretical and numerical structure for reacting shock waves. SIAM Journal on Scientific and Statistical Computing 7, 1059. [doi:10.1137/0907073](https://doi.org/10.1137/0907073)
+- Coggeshall, S. V. (1991). Analytic solutions of hydrodynamics equations. Physics of Fluids A 3, 757. [doi:10.1063/1.858008](https://doi.org/10.1063/1.858008)
+- Fickett, W., & Davis, W. C. (1979). Detonation. University of California Press.
+- Fickett, W., & Rivard, W. C. (1974). Test problems for hydrocodes. Los Alamos Scientific Laboratory report LA-5479.
 - Noh, W. F. (1987). Errors for calculations of strong shocks using an artificial viscosity and an artificial heat flux. Journal of Computational Physics 72, 78. [doi:10.1016/0021-9991(87)90074-X](https://doi.org/10.1016/0021-9991(87)90074-X)
 - Liska, R., & Wendroff, B. (2003). Comparison of several difference schemes on 1D and 2D test problems for the Euler equations. SIAM Journal on Scientific Computing 25, 995. [doi:10.1137/S1064827502402120](https://doi.org/10.1137/S1064827502402120)
 - Roe, P. L. (1986). Characteristic-based schemes for the euler equations. Annual Review of Fluid Mechanics 18, 337. [doi:10.1146/annurev.fl.18.010186.002005](https://doi.org/10.1146/annurev.fl.18.010186.002005)

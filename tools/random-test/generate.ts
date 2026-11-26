@@ -453,6 +453,14 @@ function addPart(doc: SetupSpec, kind: PartKind, ctx: Ctx, opts: PartOpts = {}, 
     const name = (part as { name: string }).name;
     if (name.startsWith('shearing')) applyShear(doc, ctx);
     if (name === 'zeldovich') applyCosmology(doc, ctx);
+    // Exact solutions for one adiabatic index: the escape of detonation products (gamma = 3) and
+    // Kidder's compression ((k + 2) / k in symmetry k).
+    if (name === 'ehep-escape' || name === 'coggeshall-6') {
+      const ph = (doc.physics ??= {});
+      ph.eos = 'ideal';
+      const k = Math.min(3, Math.max(1, Math.round(((part as { symmetry?: number }).symmetry ?? 3))));
+      ph.eosParams = { ...ph.eosParams, gamma: name === 'ehep-escape' ? 3 : (k + 2) / k };
+    }
   }
   const k = PART_OPTIONS[kind];
   const index = doc.parts!.indexOf(part);

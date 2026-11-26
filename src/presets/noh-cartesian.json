@@ -7,11 +7,11 @@
   "family": "noh",
   "familyName": "Noh implosion",
   "variant": "Cylindrical on a square grid",
-  "blurb": "The cylindrical Noh implosion on a 2D Cartesian grid (Liska and Wendroff 2003): gas falling toward the center from every direction in the plane. The flow is not aligned with the grid, so the shock tends to grow bumps along the axes and the diagonals, and the center its overheated hole. The box is twice the usual size: the gas that comes in through its open faces, which an exact solution would have to supply, forms sheets along the axes that do not reach the shock by t = 0.6.",
+  "blurb": "The cylindrical Noh implosion on a 2D Cartesian grid (Liska and Wendroff 2003): gas falling toward the center from every direction in the plane. The flow is not aligned with the grid, so the shock tends to grow bumps along the axes and the diagonals, and the center its overheated hole. The cells next to the box’s faces are held at the exact solution, as the gas beyond them would have it.",
   "domain": {
     "ndim": 2,
-    "n": 512,
-    "box": 2,
+    "n": 256,
+    "box": 1,
     "supports2d": true,
     "bc": {
       "lo": [1, 1, 0],
@@ -36,7 +36,8 @@
       "symmetry": 2,
       "speed": 1,
       "rho": 1,
-      "p": 0.000001
+      "p": 0.000001,
+      "hold": true
     }
   ],
   "run": {

@@ -134,7 +134,7 @@ describe('species that set the equation of state', () => {
     const slots = {
       eos: EOS_MODULES.degenerate, riemann: 'hydro/riemann/hllc.wgsl', limiter: 'hydro/limiters/koren.wgsl', cooling: 'cooling/off.wgsl',
       bins: 'amr/bins_off.wgsl', mid: 'amr/mid_off.wgsl', diffusion: 'const VISCOSITY = true;\nconst CONDUCTION = true;\nconst RESISTIVITY = true;\n',
-      damping: 'const DAMPING = false;\nfn damping_target(x: vec3<f32>) -> DampTarget { return DampTarget(0.0, 1.0, vec3<f32>(0.0), 1.0); }\n',
+      damping: 'const DAMPING = false;\nfn damping_target(x: vec3<f32>, t: f32) -> DampTarget { return DampTarget(0.0, 1.0, vec3<f32>(0.0), 1.0); }\n',
       species: 'hydro/species_on.wgsl', comp, comp_src: compSrcSlot(c, 40), rad_rate: 'radiation/rate_off.wgsl', opacity: 'opacity/constant.wgsl',
       species_n: 'const NG: u32 = 2u;\nconst SP_DEPTH: i32 = 40;\n',
     };

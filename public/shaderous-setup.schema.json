@@ -3117,6 +3117,192 @@
      },
      {
       "type": "object",
+      "title": "Flow: Coggeshall 1: free expansion",
+      "properties": {
+       "kind": {
+        "const": "flow"
+       },
+       "id": {
+        "type": "string",
+        "description": "A name other parts refer to it by (an orbit’s `of`, a disk’s `about`)"
+       },
+       "name": {
+        "const": "coggeshall-1"
+       },
+       "symmetry": {
+        "type": "number",
+        "title": "Symmetry",
+        "default": 3,
+        "minimum": 1,
+        "maximum": 3
+       },
+       "rho0": {
+        "type": "number",
+        "title": "Density coefficient",
+        "default": 1.8,
+        "minimum": 0.000001,
+        "maximum": 1000000
+       },
+       "b": {
+        "type": "number",
+        "title": "Density exponent",
+        "default": 1.2,
+        "minimum": -0.9,
+        "maximum": 4
+       },
+       "hold": {
+        "type": "boolean",
+        "title": "Hold the open faces",
+        "default": true
+       },
+       "T0": {
+        "type": "number",
+        "title": "Temperature coefficient",
+        "default": 1.4,
+        "minimum": 0.000001,
+        "maximum": 1000000
+       },
+       "Gamma": {
+        "type": "number",
+        "title": "Grüneisen parameter",
+        "default": 40,
+        "minimum": 0.000001,
+        "maximum": 1000000
+       },
+       "t0": {
+        "type": "number",
+        "title": "Start time",
+        "default": 1,
+        "minimum": 0.001,
+        "maximum": 1000
+       }
+      },
+      "required": [
+       "kind",
+       "name"
+      ],
+      "additionalProperties": false,
+      "description": "Gas expanding homologously, u = r / t, with its density a power of r and its pressure uniform, so that nothing pushes it: each element coasts along its adiabat (Coggeshall 1991, problem 1). The pressure falls as t^(-gamma k) for symmetry k"
+     },
+     {
+      "type": "object",
+      "title": "Flow: Coggeshall 2: expansion against pressure",
+      "properties": {
+       "kind": {
+        "const": "flow"
+       },
+       "id": {
+        "type": "string",
+        "description": "A name other parts refer to it by (an orbit’s `of`, a disk’s `about`)"
+       },
+       "name": {
+        "const": "coggeshall-2"
+       },
+       "symmetry": {
+        "type": "number",
+        "title": "Symmetry",
+        "default": 3,
+        "minimum": 1,
+        "maximum": 3
+       },
+       "rho0": {
+        "type": "number",
+        "title": "Density coefficient",
+        "default": 1.8,
+        "minimum": 0.000001,
+        "maximum": 1000000
+       },
+       "b": {
+        "type": "number",
+        "title": "Density exponent",
+        "default": 1.2,
+        "minimum": -0.9,
+        "maximum": 4
+       },
+       "hold": {
+        "type": "boolean",
+        "title": "Hold the open faces",
+        "default": true
+       },
+       "t0": {
+        "type": "number",
+        "title": "Start time",
+        "default": 1,
+        "minimum": 0.001,
+        "maximum": 1000
+       }
+      },
+      "required": [
+       "kind",
+       "name"
+      ],
+      "additionalProperties": false,
+      "description": "Gas expanding homologously, u proportional to r / t, its density a power of r and its pressure rising outward as r^(b + 2), so that it slows as it goes (Coggeshall 1991, problem 2)"
+     },
+     {
+      "type": "object",
+      "title": "Flow: Coggeshall 6: Kidder compression",
+      "properties": {
+       "kind": {
+        "const": "flow"
+       },
+       "id": {
+        "type": "string",
+        "description": "A name other parts refer to it by (an orbit’s `of`, a disk’s `about`)"
+       },
+       "name": {
+        "const": "coggeshall-6"
+       },
+       "symmetry": {
+        "type": "number",
+        "title": "Symmetry",
+        "default": 3,
+        "minimum": 1,
+        "maximum": 3
+       },
+       "rho0": {
+        "type": "number",
+        "title": "Density coefficient",
+        "default": 1.8,
+        "minimum": 0.000001,
+        "maximum": 1000000
+       },
+       "b": {
+        "type": "number",
+        "title": "Density exponent",
+        "default": 1.2,
+        "minimum": -0.9,
+        "maximum": 4
+       },
+       "hold": {
+        "type": "boolean",
+        "title": "Hold the open faces",
+        "default": true
+       },
+       "tau": {
+        "type": "number",
+        "title": "Collapse time",
+        "default": 1.25,
+        "minimum": 0.001,
+        "maximum": 1000
+       },
+       "start": {
+        "type": "number",
+        "title": "Start",
+        "default": 0,
+        "minimum": 0,
+        "maximum": 0.95
+       }
+      },
+      "required": [
+       "kind",
+       "name"
+      ],
+      "additionalProperties": false,
+      "description": "Kidder’s isentropic compression (Coggeshall 1991, problem 6): gas falling inward homologously, u = -r t / (tau^2 - t^2), squeezed without a shock so that all of it reaches the center at t = tau. Needs gamma = 5/3 in spherical symmetry, 2 in cylindrical and 3 in planar"
+     },
+     {
+      "type": "object",
       "title": "Flow: Noh implosion",
       "properties": {
        "kind": {
@@ -3156,6 +3342,11 @@
         "default": 0.000001,
         "minimum": 0,
         "maximum": 1000000
+       },
+       "hold": {
+        "type": "boolean",
+        "title": "Hold the open faces",
+        "default": true
        }
       },
       "required": [
@@ -3206,6 +3397,11 @@
         "default": 1,
         "minimum": 0,
         "maximum": 1000000
+       },
+       "hold": {
+        "type": "boolean",
+        "title": "Hold the open faces",
+        "default": true
        }
       },
       "required": [
@@ -3315,6 +3511,139 @@
       ],
       "additionalProperties": false,
       "description": "A cold gas sphere whose density falls as 1/r, rho = M / (2 pi R^2 r), in thin gas at the same specific internal energy (for gamma = 5/3). With G = M = R = 1 it collapses in about a unit of time."
+     },
+     {
+      "type": "object",
+      "title": "Flow: Mader detonation",
+      "properties": {
+       "kind": {
+        "const": "flow"
+       },
+       "id": {
+        "type": "string",
+        "description": "A name other parts refer to it by (an orbit’s `of`, a disk’s `about`)"
+       },
+       "name": {
+        "const": "mader-detonation"
+       },
+       "D": {
+        "type": "number",
+        "title": "Detonation speed",
+        "default": 0.8,
+        "minimum": 0.001,
+        "maximum": 1000
+       },
+       "rho0": {
+        "type": "number",
+        "title": "Explosive density",
+        "default": 1.875,
+        "minimum": 0.000001,
+        "maximum": 1000000
+       },
+       "t0": {
+        "type": "number",
+        "title": "Start time",
+        "default": 0.25,
+        "minimum": 0.001,
+        "maximum": 1000
+       },
+       "ea": {
+        "type": "number",
+        "title": "Activation temperature",
+        "default": 0.05,
+        "minimum": 0,
+        "maximum": 1000
+       },
+       "k": {
+        "type": "number",
+        "title": "Burn rate",
+        "default": 2000,
+        "minimum": 0.001,
+        "maximum": 1000000000
+       },
+       "shockburn": {
+        "type": "boolean",
+        "title": "Burn inside shocks",
+        "default": true
+       }
+      },
+      "required": [
+       "kind",
+       "name"
+      ],
+      "additionalProperties": false,
+      "description": "The Mader problem: a slab of explosive along x detonated from a wall at rest at the box’s lower x face (Fickett’s piston-driven detonation with the piston at rest). Behind the detonation, running at its Chapman–Jouguet speed, a Taylor wave brings the products to rest half way back to the wall. The explosive burns by a fast Arrhenius reaction releasing the energy that makes D the CJ speed. The run starts from the exact solution at a time t0, the detonation already under way. Needs the species fuel and ash"
+     },
+     {
+      "type": "object",
+      "title": "Flow: Escape of detonation products (EHEP)",
+      "properties": {
+       "kind": {
+        "const": "flow"
+       },
+       "id": {
+        "type": "string",
+        "description": "A name other parts refer to it by (an orbit’s `of`, a disk’s `about`)"
+       },
+       "name": {
+        "const": "ehep-escape"
+       },
+       "D": {
+        "type": "number",
+        "title": "Detonation speed",
+        "default": 0.85,
+        "minimum": 0.001,
+        "maximum": 1000
+       },
+       "rho0": {
+        "type": "number",
+        "title": "Explosive density",
+        "default": 1.6,
+        "minimum": 0.000001,
+        "maximum": 1000000
+       },
+       "up": {
+        "type": "number",
+        "title": "Piston speed",
+        "default": 0.05,
+        "minimum": 0,
+        "maximum": 1000
+       },
+       "at": {
+        "type": "number",
+        "title": "Piston face",
+        "default": 0.2,
+        "minimum": 0,
+        "maximum": 1000
+       },
+       "length": {
+        "type": "number",
+        "title": "Explosive length",
+        "default": 1,
+        "minimum": 0.001,
+        "maximum": 1000
+       },
+       "start": {
+        "type": "number",
+        "title": "Start",
+        "default": 1.2,
+        "minimum": 1,
+        "maximum": 5
+       },
+       "vacuum": {
+        "type": "number",
+        "title": "Vacuum density",
+        "default": 0.000001,
+        "minimum": 1e-12,
+        "maximum": 0.01
+       }
+      },
+      "required": [
+       "kind",
+       "name"
+      ],
+      "additionalProperties": false,
+      "description": "The escape of detonation products (Fickett and Rivard 1974; gamma = 3): a piston drove a detonation through a slab of explosive with vacuum beyond it. The run starts from the exact solution once the explosive is all burned, at a time of at least length / D: the products escape into the vacuum, their edge moving at D, and a rarefaction runs back to the piston and reflects from it. The piston is an obstacle that slides at its speed, from its face’s position at the start"
      },
      {
       "type": "object",

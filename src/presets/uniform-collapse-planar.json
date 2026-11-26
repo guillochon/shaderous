@@ -7,9 +7,9 @@
   "family": "uniform-collapse",
   "familyName": "Uniform collapse",
   "variant": "Planar",
-  "blurb": "Gas (gamma = 5/3) moving toward the plane x = 0 at a speed proportional to the distance from it, u = -x, so that all of it would arrive at t = 1. It stays uniform, with no shock: its density grows as 1 / (1 - t). The open outer face cannot push gas in as the exact solution would, and a rarefaction runs in from it at the sound speed: the box reaches out to r = 3 so that it stays outside r = 0.9 (0.26 in the planar box) by t = 0.5.",
+  "blurb": "Gas (gamma = 5/3) moving toward the plane x = 0 at a speed proportional to the distance from it, u = -x, so that all of it would arrive at t = 1. It stays uniform, with no shock: its density grows as 1 / (1 - t). The cells next to the open faces are held at the exact solution: an open face alone cannot push gas in as the collapse does, and a rarefaction would run in from it at the sound speed.",
   "domain": {
-    "box": 3,
+    "box": 1,
     "supports2d": true,
     "bc": {
       "lo": [1, 1, 1],
@@ -34,12 +34,13 @@
       "symmetry": 1,
       "tCollapse": 1,
       "rho": 1,
-      "e": 1
+      "e": 1,
+      "hold": true
     }
   ],
   "run": {
-    "tEnd": 0.5,
-    "checkpointDt": 0.05
+    "tEnd": 0.6,
+    "checkpointDt": 0.06
   },
   "view": {
     "field": 0,

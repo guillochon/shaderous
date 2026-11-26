@@ -275,7 +275,7 @@ function thinDisk(d: DiskPart, ctx: DiskContext): BuiltDisk {
   // The same disk as the damping zone's target. The zone starts at radius P.diff.z; P.diff.w is
   // its rate at the box's edge, per local orbital period.
   const wgsl = `const DAMPING = true;
-${tables}fn damping_target(x: vec3<f32>) -> DampTarget {
+${tables}fn damping_target(x: vec3<f32>, t: f32) -> DampTarget {
   let half = ${f32(box / 2)};
   let r0 = P.diff.z;
   let r = max(length(x.xy), 1e-6);
@@ -347,7 +347,7 @@ function balancedDisk(d: DiskPart, ctx: DiskContext): BuiltDisk {
     ? `  let disk = mid * disk_vertical(${heights ? 'x.z' : `x.z / (${f32(cs)} * pow(R, 1.5)${sgm0 === 1 ? '' : ` / ${f32(sgm0)}`})`});`
     : `  let dphi = ${g} / R - ${g} / sqrt(R * R + x.z * x.z);\n  let disk = mid * exp(-dphi / cs2);`;
   const wgsl = `const DAMPING = true;
-${tables}fn damping_target(x: vec3<f32>) -> DampTarget {
+${tables}fn damping_target(x: vec3<f32>, t: f32) -> DampTarget {
   let half = ${f32(ctx.box / 2)};
   let r0 = P.diff.z;
   let R = max(length(x.xy), 1e-6);

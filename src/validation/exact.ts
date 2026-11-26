@@ -3,12 +3,14 @@
 // the strong shock are not, the Noh implosion in its three symmetries, and the uniform collapse.
 // Each runs its preset. Registered through validation/frames.ts.
 import { exactRiemann } from '../reference/riemann_exact';
-import { nohExact, nohShockRadius, uniformCollapseExact, type RadialState } from '../reference/converging';
+import { cjState, coggeshallExact, ehepExact, fickettExact, nohExact, nohShockRadius, uniformCollapseExact, type CogCase, type RadialState, type SlabState } from '../reference/converging';
 import { RIEMANN_TUBES } from '../presets/names';
-import { problemById } from '../presets/index';
+import { preset, presetSpec, problemById } from '../presets/index';
 import { sphGrid } from '../spherical';
 import type { Sim } from '../sim';
 import { withSim, type TestDef } from './tests';
+import { HELD_CELLS } from '../setup/parts/flows/converging';
+import { startOf } from '../setup/parts/flows/coggeshall';
 
 /** A profile of one run: distance from the center (or position along a tube), density, velocity along it, pressure. */
 interface Profile {
@@ -122,8 +124,8 @@ async function nohRun(gpu: Parameters<TestDef['run']>[0], id: string, k: 1 | 2 |
     // Planar: sorted by |x| for the crossing, from the right half.
     const half: Profile = k === 1 ? { r: prof.r.slice(N / 2), rho: prof.rho.slice(N / 2), u: prof.u.slice(N / 2), p: prof.p.slice(N / 2) } : prof;
     const shock = outerCrossing(half, 0.5 * (post + preAtShock));
-    // Gas that started beyond 1 - t came in through the outer face: measured only inside it.
-    const reach = 1 - t - 2 * dx;
+    // Out to the cells held at the exact solution (the planar box's faces are at |x| = 1/2).
+    const reach = (k === 1 ? 0.5 : 1) - (HELD_CELLS + 1) * dx;
     return {
       post_shock_density: mean(prof, 'rho', (r) => r > 0.3 * rs && r < rs - 4 * dx),
       post_expected: post,
@@ -175,7 +177,7 @@ export const EXACT_TESTS: TestDef[] = [
     id: 'exact-noh',
     name: 'ExactPack Noh implosion: planar, cylindrical (R, z) and spherical (r, theta)',
     criterion:
-      'Each preset (gamma = 5/3, unit inflow, t = 0.6) at 256^2: the post-shock density, averaged from 0.3 times the shock radius (outside the wall heating every code has at the center) to 4 cells inside it, within 1%, 3% and 6% of the exact 4, 16 and 64 (planar, cylindrical, spherical: measured 0.01%, 1.5%, 4.2%), and its pressure the same (0.01%, 1.2%, 3.5%); the shock within 1.5 cells of r = 0.2 (0.07, 0.6, 0.8); the pre-shock density, rising as (1 + t / r)^(k - 1), within 1e-3 in L1 where no gas from the outer face has arrived (2e-5)',
+      'Each preset (gamma = 5/3, unit inflow, t = 0.6) at 256^2: the post-shock density, averaged from 0.3 times the shock radius (outside the wall heating every code has at the center) to 4 cells inside it, within 1%, 3% and 6% of the exact 4, 16 and 64 (planar, cylindrical, spherical: measured 0.01%, 1.5%, 4.2%), and its pressure the same (0.01%, 1.2%, 3.5%); the shock within 1.5 cells of r = 0.2 (0.07, 0.6, 0.8); the pre-shock density, rising as (1 + t / r)^(k - 1), within 1e-4 in L1 out to the cells held at the exact solution next to the outer face (2e-9, 8e-6, 6e-6)',
     async run(gpu) {
       const metrics: Record<string, number> = {};
       let pass = true;
@@ -186,7 +188,7 @@ export const EXACT_TESTS: TestDef[] = [
           Math.abs(m.post_shock_density / m.post_expected - 1) < tol &&
           Math.abs(m.post_shock_pressure / m.post_pressure_expected - 1) < tol &&
           Math.abs(m.shock_error_cells) < 1.5 &&
-          m.pre_shock_density_l1 < 1e-3;
+          m.pre_shock_density_l1 < 1e-4;
       }
       return { pass, metrics };
     },
@@ -195,9 +197,9 @@ export const EXACT_TESTS: TestDef[] = [
     id: 'exact-noh-cartesian',
     name: 'ExactPack Noh implosion: cylindrical, on a 2D Cartesian grid',
     criterion:
-      'The noh-cartesian preset (a box of side 2) at 512^2: gas falling toward the center from every direction in the plane (Liska and Wendroff 2003). The post-shock density, averaged over the ring 0.06 < r < 0.17, within 2% of 16 (measured 15.89); the shock radius along the axes and along the diagonal each within 1 cell of 0.2 (0.33 and 0.06 cells)',
+      'The noh-cartesian preset at 256^2: gas falling toward the center from every direction in the plane (Liska and Wendroff 2003). The post-shock density, averaged over the ring 0.06 < r < 0.17, within 2% of 16 (measured 15.89); the shock radius along the axes and along the diagonal each within 1 cell of 0.2 (0.33 and 0.06 cells); the pre-shock density along them within 1e-4 of 1 + t / r in L1 out to the cells held at the exact solution next to the faces (8e-6). With open faces instead, gas coming in through them formed dense sheets along the axes that reached the shock',
     async run(gpu) {
-      const n = 512;
+      const n = N;
       return withSim(gpu, problemById('noh-cartesian'), n, { ndim: 2 }, async (sim) => {
         const steps = await sim.runToEnd();
         const { u1 } = await sim.readState();
@@ -213,8 +215,8 @@ export const EXACT_TESTS: TestDef[] = [
         // Along a ray from the center: cells (c + a s, c + b s) for the axis (1, 0) and the diagonal (1, 1).
         const ray = (a: number, b: number): Profile => {
           const p: Profile = { r: [], rho: [], u: [], p: [] };
-          // out to r = 0.35: beyond it, gas that came in through the faces
-          for (let q = 0; (q + 0.5) * dx * Math.hypot(a, b) < 0.35; q++) {
+          // out to the cells held at the exact solution next to the faces
+          for (let q = 0; q < n / 2 - HELD_CELLS - 1; q++) {
             p.r.push((q + 0.5) * dx * Math.hypot(a, b));
             p.rho.push(rho(n / 2 + a * q, n / 2 + b * q));
           }
@@ -222,14 +224,22 @@ export const EXACT_TESTS: TestDef[] = [
         };
         const level = 0.5 * (16 + 4);
         const axis = [ray(1, 0), ray(0, 1)].map((p) => outerCrossing(p, level));
-        const diag = [ray(1, 1)].map((p) => outerCrossing(p, level));
+        const rays = [ray(1, 0), ray(0, 1), ray(1, 1)];
+        const diag = [rays[2]].map((p) => outerCrossing(p, level));
+        // The pre-shock density along them, (1 + t / r)
+        let dPre = 0;
+        let sPre = 0;
+        for (const p of rays)
+          p.r.forEach((r, i) => {
+            if (r > 0.2 + 4 * dx) (dPre += Math.abs(p.rho[i] - (1 + 0.6 / r))), (sPre += 1 + 0.6 / r);
+          });
         const m = {
           post_shock_density: s / k, post_expected: 16,
           shock_along_axes: (axis[0] + axis[1]) / 2, shock_along_diagonal: diag[0], shock_expected: 0.2,
           axis_error_cells: ((axis[0] + axis[1]) / 2 - 0.2) / dx, diagonal_error_cells: (diag[0] - 0.2) / dx,
-          center_density: rho(n / 2, n / 2), steps,
+          pre_shock_density_l1: dPre / sPre, center_density: rho(n / 2, n / 2), steps,
         };
-        return { pass: Math.abs(m.post_shock_density / 16 - 1) < 0.02 && Math.abs(m.axis_error_cells) < 1 && Math.abs(m.diagonal_error_cells) < 1, metrics: m };
+        return { pass: Math.abs(m.post_shock_density / 16 - 1) < 0.02 && Math.abs(m.axis_error_cells) < 1 && Math.abs(m.diagonal_error_cells) < 1 && m.pre_shock_density_l1 < 1e-4, metrics: m };
       });
     },
   },
@@ -237,7 +247,7 @@ export const EXACT_TESTS: TestDef[] = [
     id: 'exact-uniform-collapse',
     name: 'ExactPack uniform collapse (noh2): planar, cylindrical (R, z) and spherical (r, theta)',
     criterion:
-      'Each preset (gamma = 5/3, u = -r, e = 1, t = 0.5, when the density is 2, 4 and 8 times its start) at 256^2: density, pressure and velocity within 0.5% of the exact solution in L1 (measured at most 2e-5 planar, 6e-5 cylindrical, 1e-3 spherical, its velocity), where the rarefaction from the open outer face has not arrived (it moves inward at the sound speed: by t = 0.5, 0.82, 0.93 and 1.05 in r / (1 - t), less 0.15 for its smeared front)',
+      'Each preset (gamma = 5/3, u = -r, e = 1, t = 0.6, when the density is 2.5, 6.25 and 15.6 times its start) at 256^2, its outer cells held at the exact solution: density, pressure and velocity within 1e-3 of the exact solution in L1 inside them (measured at most 2.5e-6 planar, 6.6e-6 cylindrical, 5.5e-5 spherical, its velocity). With the faces open instead, a rarefaction from them reached the center by t = 0.3',
     async run(gpu) {
       const metrics: Record<string, number> = {};
       let pass = true;
@@ -248,12 +258,9 @@ export const EXACT_TESTS: TestDef[] = [
           const gamma = sim.cfg.eosParams.gamma;
           const prof = await profileOf(sim);
           const exact = (r: number) => uniformCollapseExact(k, gamma, { rho0: 1, e0: 1, tau: 1 }, r, t);
-          // How far in, in r / (1 - t), the open face's rarefaction has come: at the sound speed,
-          // c0 (1 - t)^-a with a = (gamma - 1) k / 2, which is c0 / (1 - t)^(a + 1) in r / (1 - t).
-          const a = ((gamma - 1) * k) / 2;
-          const reach = (Math.sqrt(gamma * (gamma - 1)) / a) * ((1 - t) ** -a - 1);
-          const outer = k === 1 ? sim.cfg.problem.box / 2 : prof.r[prof.r.length - 1];
-          const valid = (outer - reach - 0.15) * (1 - t);
+          // Inside the cells held at the exact solution next to the outer face.
+          const outer = k === 1 ? 0.5 : 1;
+          const valid = outer - (HELD_CELLS + 1) * (sim.cfg.problem.box / N);
           // Planar: velocity is -x on both sides, which the exact solution's u(r) has as a signed r.
           const keep = (r: number) => Math.abs(r) < valid;
           return {
@@ -264,7 +271,112 @@ export const EXACT_TESTS: TestDef[] = [
           };
         });
         for (const [key, v] of Object.entries(m)) metrics[`${tag}_${key}`] = v;
-        pass &&= m.rho_l1 < 0.005 && m.p_l1 < 0.005 && m.u_l1 < 0.005;
+        pass &&= m.rho_l1 < 1e-3 && m.p_l1 < 1e-3 && m.u_l1 < 1e-3;
+      }
+      return { pass, metrics };
+    },
+  },
+  {
+    id: 'exact-coggeshall',
+    name: 'ExactPack Coggeshall similarity solutions 1, 2 and 6 (spherical)',
+    criterion:
+      'Each preset on shells from r = 0.1 to 1 (free expansion at 128^2, gamma 1.4, t = 1 to 1.5; expansion against pressure at 256^2, gamma 1.4, t = 1 to 2; Kidder compression at 256^2, gamma 5/3, t = 0 to 1, to 0.6 of the starting radii), both radial faces held at the exact solution: shell-averaged density, pressure and velocity within 1e-3 of the exact solution in L1 between the held cells (measured at most 9.6e-5, 1.4e-4 and 4.9e-5)',
+    async run(gpu) {
+      const metrics: Record<string, number> = {};
+      let pass = true;
+      for (const [c, tag] of [[1, 'free_expansion'], [2, 'against_pressure'], [6, 'kidder']] as const) {
+        const id = `coggeshall-${c}`;
+        const spec = presetSpec(id)!;
+        const part = spec.parts![0] as unknown as { t0?: number; start?: number; rho0: number; b: number; T0?: number; Gamma?: number; tau?: number };
+        const t0 = startOf(part as unknown as Record<string, number>);
+        const m = await withSim(gpu, problemById(id), spec.domain!.n!, { ndim: 2 }, async (sim) => {
+          const steps = await sim.runToEnd();
+          const t = t0 + sim.cfg.tEnd;
+          const prof = await profileOf(sim);
+          const exact = (r: number) => coggeshallExact(c as CogCase, 3, sim.cfg.eosParams.gamma, part, r, t);
+          const dr = sim.cfg.problem.box / sim.cfg.n;
+          const keep = (r: number) => r > 0.1 + (HELD_CELLS + 1) * dr && r < 1 - (HELD_CELLS + 1) * dr;
+          return { rho_l1: l1(prof, 'rho', exact, keep), p_l1: l1(prof, 'p', exact, keep), u_l1: l1(prof, 'u', exact, keep), steps };
+        });
+        for (const [key, v] of Object.entries(m)) metrics[`${tag}_${key}`] = v;
+        pass &&= m.rho_l1 < 1e-3 && m.p_l1 < 1e-3 && m.u_l1 < 1e-3;
+      }
+      return { pass, metrics };
+    },
+  },
+  {
+    id: 'exact-detonation',
+    name: 'ExactPack piston-driven detonations: Mader, and the escape of the products (EHEP)',
+    criterion:
+      'The mader and ehep presets at 512^2 (gamma = 3), each started from its exact solution. Mader (from 0.25 to 6 us): the explosive burns by a fast Arrhenius reaction (its zone far thinner than a cell) in place of the instant CJ burn, and not in cells flagged as shocks; the detonation keeps a von Neumann spike and starts 7.5 cells behind, so the test takes its speed over the second half of the run, within 1% of CJ (measured +0.6%), and the profile from the wall to 0.2 cm short of the front: density and pressure within 3% in L1, sum |run - exact| over sum |exact| (1.7%, 1.8%), velocity within 1% of the CJ speed in mean error. EHEP (from t = 1.2, once the explosive is burned, since a moving piston cannot carry the species a burn needs, to 4.2, after the rarefaction has reflected from the piston), from the piston to 0.2 short of the products edge: density within 2.5% (1.3%), pressure within 5% (3.2%; with gamma = 3, p goes as rho^3), velocity within 1% of D',
+    async run(gpu) {
+      const metrics: Record<string, number> = {};
+      let pass = true;
+      for (const id of ['mader', 'ehep']) {
+        const c = preset(id);
+        const given = c.spec.parts![0] as unknown as { D: number; rho0: number; up?: number; at?: number; length?: number; t0?: number; start?: number };
+        const part = { up: 0, at: 0, length: 0, ...given, t0: given.start !== undefined ? (given.start * given.length!) / given.D : given.t0! };
+        const n = c.spec.domain!.n!;
+        const m = await withSim(gpu, c.problem, n, { ndim: 2, ...c.overrides }, async (sim) => {
+          const box = sim.cfg.problem.box;
+          const dx = box / n;
+          const tEnd = sim.cfg.tEnd;
+          const q = { D: part.D, rho0: part.rho0, up: part.up, L: part.length };
+          // The profile, by distance from where the piston's face started, at solution time t.
+          const at = async () => {
+            const prof = await profileOf(sim);
+            prof.r = prof.r.map((x) => x + box / 2 - part.at);
+            return prof;
+          };
+          // Mader: where the density first rises from the explosive's, from outside in.
+          const cj = cjState(3, part.D, part.rho0).rho;
+          const frontOf = (prof: Profile) => outerCrossing(prof, 0.5 * (part.rho0 + cj));
+          const out: Record<string, number> = {};
+          let front1 = NaN;
+          if (part.length === 0) {
+            sim.cfg.tEnd = tEnd / 2;
+            sim.writeParams();
+            await sim.runToEnd();
+            front1 = frontOf(await at());
+            sim.cfg.tEnd = tEnd;
+            sim.writeParams();
+          }
+          out.steps = await sim.runToEnd();
+          const t = part.t0 + tEnd;
+          const exact = (s: number): SlabState => (part.length > 0 ? ehepExact(q, s, t) : fickettExact(3, q, s, t));
+          const prof = await at();
+          // From two cells clear of the piston to the detonation (Mader) or the products' edge
+          // (EHEP), less 0.2 there: the Mader front's reaction zone and von Neumann spike, which
+          // the exact solution's instant burn has none of, and the near-vacuum edge of the escape.
+          const edge = part.D * t;
+          const keep = (s: number) => s > part.up * t + 2 * dx && s < edge - 0.2;
+          const asRadial = (s: number) => {
+            const w = exact(s);
+            return { rho: w.rho, u: w.u, p: w.p };
+          };
+          out.rho_l1 = l1(prof, 'rho', asRadial, keep);
+          out.p_l1 = l1(prof, 'p', asRadial, keep);
+          // (the velocity's mean error over the CJ speed: much of the slab is at rest)
+          let du = 0;
+          let cells = 0;
+          prof.r.forEach((r, i) => {
+            if (keep(r)) (du += Math.abs(prof.u[i] - asRadial(r).u)), cells++;
+          });
+          out.u_error = du / cells / part.D;
+          if (part.length === 0) {
+            const front = frontOf(prof);
+            out.front = front;
+            out.front_expected = edge;
+            out.front_lag_cells = (edge - front) / dx;
+            // the detonation's speed over the second half of the run, against the CJ speed
+            out.speed = (front - front1) / (tEnd / 2);
+            out.speed_error = out.speed / part.D - 1;
+          }
+          return out;
+        });
+        for (const [key, v] of Object.entries(m)) metrics[`${id}_${key}`] = v;
+        const tol = part.length === 0 ? { rho: 0.03, p: 0.03 } : { rho: 0.025, p: 0.05 };
+        pass &&= m.rho_l1 < tol.rho && m.p_l1 < tol.p && m.u_error < 0.01 && (m.speed_error === undefined || Math.abs(m.speed_error) < 0.01);
       }
       return { pass, metrics };
     },

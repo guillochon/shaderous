@@ -3124,7 +3124,7 @@ export class AmrSim implements Simulation {
       const lo = domainLo(this.cfg);
       const pos = [0, 1, 2].map((a) => (a < axes ? (index[a] + 0.5) * dx + lo[a] : 0)) as [number, number, number];
       if (stencil && this.cfg.problem.damping) {
-        this.dampProbe ??= DampProbe.create(this.device, hydroSlots(this.cfg), this.params);
+        this.dampProbe ??= DampProbe.create(this.device, hydroSlots(this.cfg), this.params, this.clock);
         stencil.damp = await (await this.dampProbe).at(pos, dx);
       }
       return {

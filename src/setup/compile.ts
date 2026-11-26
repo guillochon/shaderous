@@ -518,6 +518,8 @@ export function compileSetup(input: SetupSpec): Compiled {
   // A tunnel's sponge (it excludes a disk's damping zone).
   const tunnel = tunnelOf(spec);
   if (tunnel) damping = tunnelDamping(tunnel, boxOf(spec), d.ndim === 3 ? 3 : 2) ?? damping;
+  // A flow's own (its exact solution on the open faces); the shader decides where by position.
+  for (const f of flows) if (f.def.damping) damping = f.def.damping(flowCtx(spec, d.ndim === 2 ? 2 : 3), f.values as never) ?? damping;
 
   const mhd: MhdSpec | undefined =
     kinds.potential || kinds.face

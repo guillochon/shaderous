@@ -49,6 +49,8 @@ function fingerprint(spec: SetupSpec): string {
       out.push(w.rho, w.vx, w.vy, w.vz, w.p, w.s, w.X, A?.(x, y, z), F ? [F(0, x, y, z), F(1, x, y, z), F(2, x, y, z)] : 0, heat?.(x, y, z, w.rho));
     }
     out.push(problem.burn?.(cfg.params));
+    // a flow's damping zone: its exact solution on the open faces
+    out.push(problem.damping?.wgsl);
   }
   return JSON.stringify(out);
 }

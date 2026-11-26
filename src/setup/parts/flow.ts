@@ -66,6 +66,12 @@ export interface FlowDef<P = Record<string, number | boolean>> {
   /** A magnetic field: a vector potential, or values on the faces. */
   potential?(ctx: FlowContext, p: P): PotentialFn;
   face?(ctx: FlowContext, p: P): FaceFn;
+  /**
+   * A damping zone that goes with the flow (Problem.damping, hydro/damping.wgsl): the gas held
+   * at, or relaxed toward, a state that may change with time. A flow with an exact solution
+   * holds its open faces to it with one. Undefined: none (a disk's or a tunnel's, if any).
+   */
+  damping?(ctx: FlowContext, p: P): { wgsl: string; radius: number; rate: number; spherical?: boolean } | undefined;
   /** Burning that goes with the flow. */
   burn?(ctx: FlowContext, p: P): AnyBurnSpec;
   /**

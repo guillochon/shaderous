@@ -1,0 +1,56 @@
+{
+  "format": "shaderous-setup",
+  "version": 1,
+  "id": "coggeshall-1",
+  "name": "Coggeshall: Free expansion",
+  "group": "Shocks and blasts",
+  "family": "coggeshall",
+  "familyName": "Coggeshall similarity solutions",
+  "variant": "Free expansion",
+  "blurb": "Coggeshall’s problem 1 (ExactPack’s cog1, gamma = 1.4): gas expanding as u = r / t, its density rising outward as r^1.2 and its pressure uniform, so that nothing pushes it and every element coasts along its adiabat. The run starts at t = 1 of the solution, on shells from r = 0.1 to 1. Both radial faces are held at the exact solution.",
+  "domain": {
+    "ndim": 2,
+    "n": 128,
+    "box": 1,
+    "supports2d": true,
+    "geometry": "spherical",
+    "rMin": 0.1,
+    "bc": {
+      "lo": [1, 2, 0],
+      "hi": [1, 2, 0]
+    }
+  },
+  "physics": {
+    "eos": "ideal",
+    "eosParams": {
+      "gamma": 1.4
+    },
+    "gravity": "off",
+    "G": 0,
+    "floors": {
+      "p": 1e-12
+    }
+  },
+  "parts": [
+    {
+      "kind": "flow",
+      "name": "coggeshall-1",
+      "symmetry": 3,
+      "hold": true,
+      "rho0": 1.8,
+      "b": 1.2,
+      "T0": 1.4,
+      "Gamma": 40,
+      "t0": 1
+    }
+  ],
+  "run": {
+    "tEnd": 0.5,
+    "checkpointDt": 0.05
+  },
+  "view": {
+    "field": 0,
+    "log": true,
+    "mode": "slice"
+  }
+}

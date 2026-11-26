@@ -1,0 +1,55 @@
+{
+  "format": "shaderous-setup",
+  "version": 1,
+  "id": "coggeshall-6",
+  "name": "Coggeshall: Kidder compression",
+  "group": "Shocks and blasts",
+  "family": "coggeshall",
+  "familyName": "Coggeshall similarity solutions",
+  "variant": "Kidder compression",
+  "blurb": "Kidder’s isentropic compression, Coggeshall’s problem 6 (ExactPack’s cog6, gamma = 5/3): gas starting at rest and falling inward as u = -r t / (tau^2 - t^2), squeezed without a shock so that all of it would reach the center at t = tau = 1.25. By t = 1 every element is at 0.6 of its starting radius, on shells from r = 0.1 to 1. Both radial faces are held at the exact solution.",
+  "domain": {
+    "ndim": 2,
+    "n": 256,
+    "box": 1,
+    "supports2d": true,
+    "geometry": "spherical",
+    "rMin": 0.1,
+    "bc": {
+      "lo": [1, 2, 0],
+      "hi": [1, 2, 0]
+    }
+  },
+  "physics": {
+    "eos": "ideal",
+    "eosParams": {
+      "gamma": 1.6666666666666667
+    },
+    "gravity": "off",
+    "G": 0,
+    "floors": {
+      "p": 1e-12
+    }
+  },
+  "parts": [
+    {
+      "kind": "flow",
+      "name": "coggeshall-6",
+      "symmetry": 3,
+      "hold": true,
+      "rho0": 1.8,
+      "b": 1.2,
+      "tau": 1.25,
+      "start": 0
+    }
+  ],
+  "run": {
+    "tEnd": 1,
+    "checkpointDt": 0.1
+  },
+  "view": {
+    "field": 0,
+    "log": true,
+    "mode": "slice"
+  }
+}

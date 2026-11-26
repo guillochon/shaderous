@@ -14,7 +14,7 @@
 // Requires P, g_dx, the equation of state, hydro/dual_energy.wgsl, hydro/advance.wgsl
 // (NewState) and the <damping> slot, which defines
 //   const DAMPING: bool;
-//   fn damping_target(x: vec3<f32>) -> DampTarget;   // x relative to the box center
+//   fn damping_target(x: vec3<f32>, t: f32) -> DampTarget;   // x relative to the box center, at time t
 struct DampTarget {
   rate: f32,         // relaxation rate (per unit time); 0 outside the zone
   rho: f32,
@@ -52,7 +52,8 @@ fn apply_damping(st: NewState, x: vec3<f32>, dt: f32, t: f32) -> NewState {
   if (!DAMPING) { return s; }
   var pos = frac_pos(x);
   if (P.dims.z == 1u) { pos.z = 0.0; }
-  let tg = damping_target(pos);
+  // (the state wanted at the end of the step)
+  let tg = damping_target(pos, t + dt);
   if (!(tg.rate > 0.0)) { return s; }
   let f = 1.0 - exp(-tg.rate * dt);
   let rho = max(s.u1.x, P.rho_floor);

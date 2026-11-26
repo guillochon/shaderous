@@ -24,6 +24,8 @@ export const PRESET_ORDER: readonly string[] = [
   'sedov', 'sedov-rad', 'blast-axisymmetric', 'blast-spherical', 'sod-x', 'sod-y', 'sod-z', 'sod-diag', 'strong-shock',
   'riemann-einfeldt', 'riemann-stationary-contact', 'riemann-slow-shock', 'riemann-shock-contact-shock', 'riemann-leblanc',
   'noh-spherical', 'noh-cylindrical', 'noh-planar', 'noh-cartesian', 'uniform-collapse-spherical', 'uniform-collapse-cylindrical', 'uniform-collapse-planar',
+  'coggeshall-1', 'coggeshall-2', 'coggeshall-6',
+  'mader', 'ehep',
   'forward-step', 'shock-bubble',
   'detonation-stable', 'detonation-pulsating', 'detonation-cellular', 'detonation-co',
   // Radiation

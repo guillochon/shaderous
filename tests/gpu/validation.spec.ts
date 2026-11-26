@@ -11,7 +11,7 @@ const TESTS = [
   'shear-steady', 'shear-mass', 'shear-wave', 'shear-flux', 'shear-mri', 'shear-epicycle',
   'cyl-rest', 'cyl-conserve', 'cyl-sedov', 'cyl-sink', 'cyl-blocks', 'cyl-sphere', 'cyl-evrard', 'cyl-sphere-blocks', 'cyl-evrard-blocks', 'cyl-mirror', 'cyl-species', 'cyl-noh', 'cyl-bondi', 'cyl-torus', 'cyl-mhd', 'cyl-column', 'cyl-star', 'cyl-swirl',
   'sph-rest', 'sph-conserve', 'sph-sedov', 'sph-species', 'sph-polytrope', 'sph-bondi', 'sph-blocks', 'sph-polytrope-blocks', 'sph-swirl', 'sph-second-collapse',
-  'exact-riemann', 'exact-noh', 'exact-noh-cartesian', 'exact-uniform-collapse',
+  'exact-riemann', 'exact-noh', 'exact-noh-cartesian', 'exact-uniform-collapse', 'exact-coggeshall', 'exact-detonation',
   'liquid-eos', 'liquid-gresho', 'liquid-taylor-green', 'liquid-cavity', 'liquid-amr',
   'aneos-eos', 'planet-rest', 'giant-impact',
   'psplit-solver', 'psplit-gresho', 'psplit-2d-3d', 'psplit-taylor-green', 'psplit-cavity', 'psplit-obstacle', 'psplit-balance', 'psplit-acoustic', 'psplit-amr-unrefined', 'psplit-amr-gresho', 'psplit-amr-regrid', 'psplit-amr-3d', 'psplit-amr-shear', 'psplit-gas-gresho', 'psplit-amr-gas', 'psplit-sod', 'psplit-amr-sod', 'psplit-moving-jump', 'psplit-amr-balance', 'psplit-amr-field', 'psplit-species', 'psplit-species-eos', 'psplit-gas-balance', 'psplit-gas-polytrope', 'psplit-gas-star-vacuum', 'psplit-gas-star-moving', 'psplit-amr-polytrope', 'psplit-masses', 'psplit-amr-wake',

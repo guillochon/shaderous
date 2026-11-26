@@ -15,12 +15,13 @@ export class DampProbe {
     private device: GPUDevice,
     private pipeline: GPUComputePipeline,
     private params: GPUBuffer,
+    private clock: GPUBuffer,
   ) {}
 
-  /** A probe for a run whose hydro slots (src/sim.ts hydroSlots) hold its damping zone, reading its uniform block `params`. */
-  static async create(device: GPUDevice, slots: Record<string, string>, params: GPUBuffer): Promise<DampProbe> {
+  /** A probe for a run whose hydro slots (src/sim.ts hydroSlots) hold its damping zone, reading its uniform block `params` and its clock (the target at the run's time). */
+  static async create(device: GPUDevice, slots: Record<string, string>, params: GPUBuffer, clock: GPUBuffer): Promise<DampProbe> {
     const pipeline = await computePipeline(device, assemble('hydro/damp_probe.wgsl', slots), 'damping target probe');
-    return new DampProbe(device, pipeline, params);
+    return new DampProbe(device, pipeline, params, clock);
   }
 
   /** The target at `x` (relative to the box center), in a cell of size dx. */
@@ -36,6 +37,7 @@ export class DampProbe {
         { binding: 0, resource: { buffer: this.params } },
         { binding: 1, resource: { buffer: at } },
         { binding: 2, resource: { buffer: out } },
+        { binding: 3, resource: { buffer: this.clock } },
       ],
     });
     const enc = d.createCommandEncoder();

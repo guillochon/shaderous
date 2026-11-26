@@ -171,7 +171,7 @@ export function tunnelDamping(t: TunnelPart, box: number, ndim: 2 | 3): { wgsl: 
   w[k.a] = k.rotor;
   const vel = k.rotor !== 0 ? `vec3<f32>(${v.map(f32).join(', ')}) - cross(vec3<f32>(${w.map(f32).join(', ')}), x)` : `vec3<f32>(${v.map(f32).join(', ')})`;
   const wgsl = `const DAMPING = true;
-fn damping_target(x: vec3<f32>) -> DampTarget {
+fn damping_target(x: vec3<f32>, t: f32) -> DampTarget {
   let s = (x[${k.a}] - ${f32(start)}) / ${f32(len)};
   if (s <= 0.0) { return DampTarget(0.0, 1.0, vec3<f32>(0.0), 1.0); }
   let ramp = min(s, 1.0);

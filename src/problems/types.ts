@@ -388,12 +388,15 @@ export interface Problem {
   burn?: (params: Record<string, number>) => AnyBurnSpec;
   /**
    * A damping zone (hydro/damping.wgsl). `wgsl` defines `const DAMPING = true;` and
-   * `fn damping_target(x: vec3<f32>) -> DampTarget`, the state the gas at `x` (relative to the
-   * box center) is relaxed toward and how fast; it reads the zone's inner radius and rate from
-   * P.diff.z and P.diff.w. `radius` and `rate` are their defaults (SimConfig.dampRadius and
-   * dampRate).
+   * `fn damping_target(x: vec3<f32>, t: f32) -> DampTarget`, the state the gas at `x` (relative
+   * to the box center) is relaxed toward at time `t` (the end of the step) and how fast; a
+   * disk's reads the zone's inner radius and rate from P.diff.z and P.diff.w. `radius` and
+   * `rate` are their defaults (SimConfig.dampRadius and dampRate). A rate of 1e30 holds the gas
+   * at the target: a flow's exact solution on its open faces (setup/parts/flows/converging.ts).
+   * `spherical`: the target takes a spherical run's positions as they are, (r, theta), and
+   * gives its velocity as (v_r, v_theta, v_phi); without it a spherical run refuses the zone.
    */
-  damping?: { wgsl: string; radius: number; rate: number };
+  damping?: { wgsl: string; radius: number; rate: number; spherical?: boolean };
   /**
    * Radiation transport switched on by default (SimConfig.radiation), its opacity law and
    * constants (code units, over those the problem's units give), the speed of light (code
