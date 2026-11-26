@@ -20,6 +20,15 @@
 # Measure the mass transfer from the .athdf files with dwd-mdot.mjs (see its header).
 # Host memory peaks at about 8-9 times a checkpoint's size: 17-24 GB for the CO sweep (2 GB
 # checkpoints), 36-45 GB with the 13 aprox13 species (4.8 GB): sbatch --mem=64G for those.
+#   RESUME     1: carry on from the newest checkpoint in f<FILL>/ or a folder below it, into
+#              f<FILL>/resume-<job>/ (dwd-mdot.mjs reads the folders below a fill's too)
+#   STALL      seconds without a file written before a run counts as hung (default 5400; an
+#              output comes every 10 to 25 minutes, the start takes about 10): the job then stops
+#              it and submits itself again with RESUME=1, on what is likely another GPU
+#   RESUMES    how many times it may do that (default 3)
+#   POLL       seconds between the watchdog's looks (default 60)
+# Six runs of the helium-donor sweep hung for hours (2026-11-26): the GPU idle, Chrome waiting in
+# the driver, no error, and other runs on the same nodes went on. Hence the watchdog.
 # Stop a run: touch SWEEP_DIR/f<FILL>/STOP (it stops at its next output, writing an .athdf file).
 #SBATCH --job-name=dwd-sweep
 #SBATCH --partition=umd-cscdr-gpu
@@ -41,8 +50,9 @@ export SHADEROUS_BINDS="${SHADEROUS_BINDS:-/work/pi_rfisher1_umassd_edu}"
 SETUPS="${SETUPS:-tools/headless/slurm/dwd-sweep}"
 setup="$SETUPS/f$FILL.shaderous.json"
 out="$SWEEP_DIR/f$FILL"
+RESUME="${RESUME:-0}" STALL="${STALL:-5400}" RESUMES="${RESUMES:-3}" POLL="${POLL:-60}"
 [ -f "$SHADEROUS_DIR/$setup" ] || { echo "no setup $setup"; exit 1; }
-if [ -e "$out/manifest.json" ] && grep -q '"stopped"' "$out/manifest.json" 2>/dev/null; then
+if [ "$RESUME" != 1 ] && [ -e "$out/manifest.json" ] && grep -q '"stopped"' "$out/manifest.json" 2>/dev/null; then
   echo "$out has a finished run: move it away to run again"; exit 1
 fi
 mkdir -p "$out"
@@ -56,18 +66,68 @@ sim() {
     --shot "vol:mode=volume,showBlocks=false,fieldLines=true,fieldLineCount=400,fieldLineFloor=0.001,dist=$VOL_DIST,pitch=0.45,yaw=1.2,minRho=0.05,opacity=120,box=false" \
     --shot "slice:mode=slice,sliceAxis=2,zoom=$SLICE_ZOOM,showBlocks=false,fieldLines=true,fieldLineCount=300,fieldLineFloor=0.00001"
 }
-sim --setup "$setup" --out "$out"
+state() { in_container node tools/headless/slurm/sweep-state.mjs "$@"; }
+kill_tree() {
+  local p
+  for p in $(ps -o pid= --ppid "$1"); do kill_tree "$p"; done
+  kill -KILL "$1" 2>/dev/null
+}
+# A run into folder $1 (the rest: the runner's arguments), watched: its exit status, or 124 if
+# nothing was written to the folder for STALL seconds and it was stopped.
+watched() {
+  local dir=$1
+  shift
+  mkdir -p "$dir"
+  sim "$@" --out "$dir" &
+  local pid=$! last newest
+  last=$(date +%s)
+  while kill -0 "$pid" 2>/dev/null; do
+    sleep "$POLL"
+    newest=$(find "$dir" -maxdepth 1 -type f -printf '%T@\n' 2>/dev/null | sort -n | tail -1)
+    newest=${newest%.*}
+    [ -n "$newest" ] && [ "$newest" -gt "$last" ] && last=$newest
+    if [ $(( $(date +%s) - last )) -gt "$STALL" ]; then
+      echo "nothing written to $dir for over $STALL s: stopping the run"
+      kill_tree "$pid"
+      wait "$pid" 2>/dev/null
+      return 124
+    fi
+  done
+  wait "$pid"
+}
+# After a hang: this job again with RESUME=1, as long as resumes are left.
+again() {
+  if [ "$RESUMES" -gt 0 ]; then
+    echo "submitting again to resume ($RESUMES resumes left)"
+    RESUME=1 RESUMES=$((RESUMES - 1)) sbatch --job-name="$SLURM_JOB_NAME" ${SLURM_MEM_PER_NODE:+--mem="${SLURM_MEM_PER_NODE}M"} "$SHADEROUS_DIR/tools/headless/slurm/dwd-sweep.sbatch"
+  else
+    echo "no resumes left"
+  fi
+}
+
+from=""
+[ "$RESUME" = 1 ] && from=$(state latest "$out")
+if [ -n "$from" ]; then
+  seg="$out/resume-$SLURM_JOB_ID"
+  echo "resuming from $from into $seg"
+  watched "$seg" --from "$from"
+else
+  seg="$out"
+  watched "$seg" --setup "$setup"
+fi
 status=$?
 echo "runner exit $status"
+[ "$status" -eq 124 ] && { again; exit 1; }
 # A setup that watches for burning (he4, c12 and o16 alone) stops with 'burn' once it is found:
 # the run carries on in the same job from that checkpoint with all thirteen of the network's
-# species, into f<FILL>/switched/ (dwd-mdot.mjs reads the folders below a fill's too).
-stopped=$(in_container node -e 'const m = require(process.argv[1]); console.log(m.stopped ?? "")' "$out/manifest.json" 2>/dev/null)
+# species, into f<FILL>/switched-<job>/ (dwd-mdot.mjs reads the folders below a fill's too).
+stopped=$(state stopped "$seg")
 if [ "$status" -eq 0 ] && [ "$stopped" = "burn" ]; then
-  from=$(in_container node -e 'const m = require(process.argv[1]); const f = m.outputs.flatMap((o) => o.files).filter((f) => f.endsWith(".athdf")).at(-1); console.log(f ? require("path").join(process.argv[2], f) : "")' "$out/manifest.json" "$out")
+  from=$(state last "$seg")
   echo "burning found: carrying on from $from with all thirteen species"
-  sim --from "$from" --switch-burn --out "$out/switched"
+  watched "$out/switched-$SLURM_JOB_ID" --from "$from" --switch-burn
   status=$?
   echo "runner exit $status"
+  [ "$status" -eq 124 ] && { again; exit 1; }
 fi
 exit $status
