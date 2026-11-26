@@ -3031,7 +3031,7 @@ bound, and the rate grew with it.
 
 ## 23. Validation
 
-The validation suite (`src/validation/tests.ts`) has 180 tests. It runs on your own GPU at
+The validation suite (`src/validation/tests.ts`) has 221 tests. It runs on your own GPU at
 [validate.html](https://guillochon.github.io/shaderous/validate.html) or with
 `npm run test:gpu`. Reference solutions come from a float64 CPU implementation of the same
 scheme (`src/reference/hydro.ts`) and an exact Riemann solver ([Toro 2009][Toro2009],
@@ -3047,6 +3047,39 @@ coordinates), HDF5 round trips, GPU against CPU reference, the weakly compressib
 implicit pressure for the liquid and the gas (§9), the MHD tests of §21, the frames and
 coordinates of §22, radiation transport (§24), and the ANEOS materials, a planet at rest and
 the moon-forming impact (§25). Each test's pass criterion is printed next to its result.
+
+Four tests (`src/validation/exact.ts`) check presets against closed-form solutions from
+ExactPack, Los Alamos's suite of exact solutions. Their formulas are in
+`src/reference/converging.ts`, with the Riemann problems taken from the exact solver above:
+
+- **Riemann problems** (`riemann-*` presets, at $`256^2`$): Einfeldt's 1-2-3 with its
+  near-vacuum, Toro's stationary contact, Quirk's slow shock, shock-contact-shock and LeBlanc's
+  tube with its pressure ratio of $`10^9`$. Their relative L1 density errors are 0.0095, 0.038
+  (a shell six times denser than the gas around it, a few cells wide), 0.0039, 0.0027 and
+  0.0085, with no floored cells. The states are those of ExactPack's own tests: its docstring
+  table gives the slow shock's left density as 1 and the stationary contact's right pressure
+  as 0.02, where the tests have 3.857143 and 0.01.
+- **Noh implosion** ([Noh 1987][Noh1987]; `noh-*` presets, the `noh` flow, $`\gamma = 5/3`$,
+  $`t = 0.6`$, at $`256^2`$). Planar: post-shock density 4.000 of 4. Cylindrical (R, z):
+  15.76 of 16. Spherical (r, θ): 61.3 of 64, with the wall heating at the center left out of
+  the average. In all three the shock is within 0.85 cells of $`r = 0.2`$, and the pre-shock
+  density within $`2	imes10^{-5}`$ of $`(1 + t/r)^{k-1}`$. On a 2D Cartesian grid
+  ([Liska & Wendroff 2003][Liska2003]) it gets 15.89 of 16, with the shock within 0.33 cells
+  of round along the axes and the diagonal. Its box is of side 2: through open faces, which
+  cannot supply the converging gas the exact solution has outside the box, the inflowing gas
+  forms dense sheets along the axes, which in a box of side 1 reach the shock by $`t = 0.6`$.
+- **Uniform collapse** (ExactPack's noh2; `uniform-collapse-*` presets, the
+  `uniform-collapse` flow): $`u = -r/(1 - t)`$, with the density and the specific internal
+  energy uniform along the adiabat. At $`t = 0.5`$ the L1 error in density, pressure and
+  velocity is at most $`2	imes10^{-5}`$ planar, $`6	imes10^{-5}`$ cylindrical and
+  $`10^{-3}`$ spherical. The comparison covers only the part of the box that the open outer
+  face's rarefaction has not reached. That rarefaction moves inward at the sound speed, through
+  $`c_0\,((1-t)^{-a} - 1)/a`$ in $`r/(1-t)`$ with $`a = (\gamma - 1)k/2`$, so the presets reach
+  out to $`r = 3`$.
+
+Holding the outer face at the exact solution would remove both limits. That is for a later
+change, together with the problems that need new code: Mader's detonation, the escape of
+explosive products, and Coggeshall's similarity solutions.
 
 ## 24. Radiation transport
 
@@ -3754,6 +3787,8 @@ two levels of blocks (the test's threshold is 1e-4).
 [Plewa1999]: https://arxiv.org/abs/astro-ph/9807241
 [Plummer1911]: https://doi.org/10.1093/mnras/71.5.460
 [Quirk1994]: https://doi.org/10.1002/fld.1650180603
+[Noh1987]: https://doi.org/10.1016/0021-9991(87)90074-X
+[Liska2003]: https://doi.org/10.1137/S1064827502402120
 [Roe1986]: https://doi.org/10.1146/annurev.fl.18.010186.002005
 [Ross2011]: https://arxiv.org/abs/1011.0686
 [Saha1920]: https://doi.org/10.1080/14786441008636148
@@ -3829,6 +3864,8 @@ two levels of blocks (the test's threshold is 1e-4).
 - Plewa, T., & Müller, E. (1999). The consistent multi-fluid advection method. A&A 342, 179. [arXiv:astro-ph/9807241](https://arxiv.org/abs/astro-ph/9807241)
 - Plummer, H. C. (1911). On the problem of distribution in globular star clusters. MNRAS 71, 460. [doi:10.1093/mnras/71.5.460](https://doi.org/10.1093/mnras/71.5.460)
 - Quirk, J. J. (1994). A contribution to the great Riemann solver debate. International Journal for Numerical Methods in Fluids 18, 555. [doi:10.1002/fld.1650180603](https://doi.org/10.1002/fld.1650180603)
+- Noh, W. F. (1987). Errors for calculations of strong shocks using an artificial viscosity and an artificial heat flux. Journal of Computational Physics 72, 78. [doi:10.1016/0021-9991(87)90074-X](https://doi.org/10.1016/0021-9991(87)90074-X)
+- Liska, R., & Wendroff, B. (2003). Comparison of several difference schemes on 1D and 2D test problems for the Euler equations. SIAM Journal on Scientific Computing 25, 995. [doi:10.1137/S1064827502402120](https://doi.org/10.1137/S1064827502402120)
 - Roe, P. L. (1986). Characteristic-based schemes for the euler equations. Annual Review of Fluid Mechanics 18, 337. [doi:10.1146/annurev.fl.18.010186.002005](https://doi.org/10.1146/annurev.fl.18.010186.002005)
 - Ross, S., Gordon, G. J., & Bagnell, J. A. (2011). A reduction of imitation learning and structured prediction to no-regret online learning. AISTATS 2011. [arXiv:1011.0686](https://arxiv.org/abs/1011.0686)
 - Saha, M. N. (1920). Ionization in the Solar Chromosphere. Philosophical Magazine 40, 472. [doi:10.1080/14786441008636148](https://doi.org/10.1080/14786441008636148)

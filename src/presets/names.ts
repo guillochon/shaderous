@@ -27,7 +27,8 @@ export interface TubeState {
   u: number;
   p: number;
 }
-export type Tube = Problem & { dir: [number, number, number]; left: TubeState; right: TubeState };
+/** A shock tube: its normal, the two states (velocity along the normal), and where along the normal they meet. */
+export type Tube = Problem & { dir: [number, number, number]; left: TubeState; right: TubeState; x0: number };
 
 /** A shock tube preset with its two states and the direction of its normal. */
 function tube(id: string): Tube {
@@ -35,11 +36,14 @@ function tube(id: string): Tube {
   const region = s.parts![0] as RegionPart;
   const shape = region.shape as { normal: [number, number, number] };
   const norm = Math.hypot(...shape.normal);
+  const dir = shape.normal.map((c) => c / norm) as [number, number, number];
+  const along = (v?: number[]) => (v ? v[0] * dir[0] + v[1] * dir[1] + v[2] * dir[2] : 0);
   return {
     ...problem(id),
-    dir: shape.normal.map((c) => c / norm) as [number, number, number],
-    left: { rho: region.rho!, u: 0, p: region.p! },
-    right: { rho: s.background!.rho!, u: 0, p: s.background!.p! },
+    dir,
+    left: { rho: region.rho!, u: along(region.v), p: region.p! },
+    right: { rho: s.background!.rho!, u: along(s.background!.v), p: s.background!.p! },
+    x0: (shape as { at?: number }).at ?? 0,
   };
 }
 export const sodX = tube('sod-x');
@@ -47,6 +51,8 @@ export const sodY = tube('sod-y');
 export const sodZ = tube('sod-z');
 export const sodDiag = tube('sod-diag');
 export const strongShock = tube('strong-shock');
+/** The Riemann problems of ExactPack's table that Sod and the strong shock are not. */
+export const RIEMANN_TUBES = ['riemann-einfeldt', 'riemann-stationary-contact', 'riemann-slow-shock', 'riemann-shock-contact-shock', 'riemann-leblanc'].map(tube);
 
 // ---- blasts and spheres ----
 /** Sedov-Taylor similarity constant: R(t) = xi0 (E t^2 / rho)^(1/5). */

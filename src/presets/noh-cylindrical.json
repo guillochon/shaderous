@@ -1,0 +1,52 @@
+{
+  "format": "shaderous-setup",
+  "version": 1,
+  "id": "noh-cylindrical",
+  "name": "Noh implosion (cylindrical)",
+  "group": "Shocks and blasts",
+  "family": "noh",
+  "familyName": "Noh implosion",
+  "variant": "Cylindrical (R, z)",
+  "blurb": "Cold gas (gamma = 5/3) falling at unit speed toward the axis of an axisymmetric (R, z) run, the same at every height. A shock leaves the axis at speed 1/3. Behind it the gas is at rest at 16 times its starting density; ahead of it the density grows as 1 + t / R.",
+  "domain": {
+    "ndim": 2,
+    "n": 256,
+    "box": 1,
+    "supports2d": true,
+    "geometry": "cylindrical",
+    "bc": {
+      "lo": [2, 0, 0],
+      "hi": [1, 0, 0]
+    }
+  },
+  "physics": {
+    "eos": "ideal",
+    "eosParams": {
+      "gamma": 1.6666666666666667
+    },
+    "gravity": "off",
+    "G": 0,
+    "floors": {
+      "p": 1e-12
+    }
+  },
+  "parts": [
+    {
+      "kind": "flow",
+      "name": "noh",
+      "symmetry": 2,
+      "speed": 1,
+      "rho": 1,
+      "p": 0.000001
+    }
+  ],
+  "run": {
+    "tEnd": 0.6,
+    "checkpointDt": 0.06
+  },
+  "view": {
+    "field": 0,
+    "log": false,
+    "mode": "slice"
+  }
+}

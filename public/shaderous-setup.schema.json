@@ -3117,6 +3117,106 @@
      },
      {
       "type": "object",
+      "title": "Flow: Noh implosion",
+      "properties": {
+       "kind": {
+        "const": "flow"
+       },
+       "id": {
+        "type": "string",
+        "description": "A name other parts refer to it by (an orbit’s `of`, a disk’s `about`)"
+       },
+       "name": {
+        "const": "noh"
+       },
+       "symmetry": {
+        "type": "number",
+        "title": "Symmetry",
+        "default": 3,
+        "minimum": 1,
+        "maximum": 3
+       },
+       "speed": {
+        "type": "number",
+        "title": "Speed",
+        "default": 1,
+        "minimum": 0.000001,
+        "maximum": 1000000
+       },
+       "rho": {
+        "type": "number",
+        "title": "Density",
+        "default": 1,
+        "minimum": 1e-12,
+        "maximum": 1000000000000
+       },
+       "p": {
+        "type": "number",
+        "title": "Pressure",
+        "default": 0.000001,
+        "minimum": 0,
+        "maximum": 1000000
+       }
+      },
+      "required": [
+       "kind",
+       "name"
+      ],
+      "additionalProperties": false,
+      "description": "Cold gas of uniform density falling at one speed toward a point, a line or a plane (Noh 1987). A shock leaves the center at a third of that speed (for gamma = 5/3), and the gas behind it is at rest, compressed 64 times in spherical symmetry (16 in cylindrical, 4 in planar). The exact solution is known everywhere, which makes it the standard test of wall heating at the center"
+     },
+     {
+      "type": "object",
+      "title": "Flow: Uniform collapse",
+      "properties": {
+       "kind": {
+        "const": "flow"
+       },
+       "id": {
+        "type": "string",
+        "description": "A name other parts refer to it by (an orbit’s `of`, a disk’s `about`)"
+       },
+       "name": {
+        "const": "uniform-collapse"
+       },
+       "symmetry": {
+        "type": "number",
+        "title": "Symmetry",
+        "default": 3,
+        "minimum": 1,
+        "maximum": 3
+       },
+       "tCollapse": {
+        "type": "number",
+        "title": "Collapse time",
+        "default": 1,
+        "minimum": 0.000001,
+        "maximum": 1000000
+       },
+       "rho": {
+        "type": "number",
+        "title": "Density",
+        "default": 1,
+        "minimum": 1e-12,
+        "maximum": 1000000000000
+       },
+       "e": {
+        "type": "number",
+        "title": "Specific internal energy",
+        "default": 1,
+        "minimum": 0,
+        "maximum": 1000000
+       }
+      },
+      "required": [
+       "kind",
+       "name"
+      ],
+      "additionalProperties": false,
+      "description": "Gas of uniform density and temperature falling inward at a speed proportional to the distance, u = -r / t_c, so all of it reaches the center at once at t = t_c (ExactPack’s noh2). It stays uniform as it is compressed along its adiabat, with no shock: the density grows as (1 - t / t_c)^-k, for k = 3, 2 or 1 by the symmetry"
+     },
+     {
+      "type": "object",
       "title": "Flow: ZND detonation",
       "properties": {
        "kind": {

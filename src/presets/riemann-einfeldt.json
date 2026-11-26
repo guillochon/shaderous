@@ -1,0 +1,58 @@
+{
+  "format": "shaderous-setup",
+  "version": 1,
+  "id": "riemann-einfeldt",
+  "name": "Riemann problem: Einfeldt 1-2-3",
+  "group": "Shocks and blasts",
+  "family": "riemann",
+  "familyName": "Riemann problems",
+  "variant": "Einfeldt 1-2-3",
+  "blurb": "Two halves of gas pulled apart at speed 2 each way (Einfeldt et al. 1991, Toro’s test 2): two rarefactions leave a near-vacuum between them, at a pressure of 0.0019. A test of positivity: schemes that linearize the Riemann problem can give negative densities here.",
+  "domain": {
+    "box": 1,
+    "supports2d": true,
+    "bc": {
+      "lo": [1, 1, 1],
+      "hi": [1, 1, 1]
+    }
+  },
+  "physics": {
+    "eos": "ideal",
+    "eosParams": {
+      "gamma": 1.4
+    },
+    "gravity": "off",
+    "G": 0,
+    "floors": {
+      "p": 1e-12
+    }
+  },
+  "background": {
+    "rho": 1,
+    "p": 0.4,
+    "v": [2, 0, 0]
+  },
+  "parts": [
+    {
+      "kind": "region",
+      "id": "left",
+      "shape": {
+        "type": "half",
+        "normal": [1, 0, 0],
+        "at": 0
+      },
+      "rho": 1,
+      "p": 0.4,
+      "v": [-2, 0, 0],
+      "s": 1
+    }
+  ],
+  "run": {
+    "tEnd": 0.15,
+    "checkpointDt": 0.015
+  },
+  "view": {
+    "mode": "slice",
+    "log": false
+  }
+}

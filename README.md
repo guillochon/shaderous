@@ -157,7 +157,7 @@ a magnetized accretion disk at 512^3 with three levels of refinement, held 16.8 
 memory (about 24 million cells) on an RTX 4090 and ran an orbit in 14 minutes
 ([details](docs/headless.md#largest-run-so-far)). The state can be exported as Athena++-style HDF5 that
 [yt](https://yt-project.org/) reads directly, and a run can be recorded as an MP4 movie. A
-suite of 180 validation tests runs on your own GPU, in the browser or from the command line.
+suite of 221 validation tests runs on your own GPU, in the browser or from the command line.
 Scripts and AI agents can drive the simulator too: through a JavaScript API in the page, a
 command-line runner for single runs and parameter sweeps, or an MCP server.
 

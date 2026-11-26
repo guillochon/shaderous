@@ -1,0 +1,53 @@
+{
+  "format": "shaderous-setup",
+  "version": 1,
+  "id": "uniform-collapse-spherical",
+  "name": "Uniform collapse (spherical)",
+  "group": "Shocks and blasts",
+  "family": "uniform-collapse",
+  "familyName": "Uniform collapse",
+  "variant": "Spherical (r, theta)",
+  "blurb": "Gas (gamma = 5/3) falling inward at a speed proportional to radius, u = -r, so that all of it would reach the origin at t = 1 (ExactPack’s noh2). It stays uniform as it is squeezed along its adiabat, with no shock: at t = 0.5 the density is 8 times its start everywhere. The open outer face cannot push gas in as the exact solution would, and a rarefaction runs in from it at the sound speed: the box reaches out to r = 3 so that it stays outside r = 0.9 (0.26 in the planar box) by t = 0.5.",
+  "domain": {
+    "ndim": 2,
+    "n": 256,
+    "box": 3,
+    "supports2d": true,
+    "geometry": "spherical",
+    "rMin": 0.02,
+    "bc": {
+      "lo": [2, 2, 0],
+      "hi": [1, 2, 0]
+    }
+  },
+  "physics": {
+    "eos": "ideal",
+    "eosParams": {
+      "gamma": 1.6666666666666667
+    },
+    "gravity": "off",
+    "G": 0,
+    "floors": {
+      "p": 1e-12
+    }
+  },
+  "parts": [
+    {
+      "kind": "flow",
+      "name": "uniform-collapse",
+      "symmetry": 3,
+      "tCollapse": 1,
+      "rho": 1,
+      "e": 1
+    }
+  ],
+  "run": {
+    "tEnd": 0.5,
+    "checkpointDt": 0.05
+  },
+  "view": {
+    "field": 0,
+    "log": false,
+    "mode": "slice"
+  }
+}

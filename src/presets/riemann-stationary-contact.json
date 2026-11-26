@@ -1,0 +1,58 @@
+{
+  "format": "shaderous-setup",
+  "version": 1,
+  "id": "riemann-stationary-contact",
+  "name": "Riemann problem: Stationary contact",
+  "group": "Shocks and blasts",
+  "family": "riemann",
+  "familyName": "Riemann problems",
+  "variant": "Stationary contact",
+  "blurb": "Toro’s test 5: the left state of the strong blast wave (pressure 1000 against 0.01), with all the gas moving left at 19.59745, which brings the contact to rest. A scheme that smears a contact it holds still shows here; one that cannot hold it still, more so.",
+  "domain": {
+    "box": 1,
+    "supports2d": true,
+    "bc": {
+      "lo": [1, 1, 1],
+      "hi": [1, 1, 1]
+    }
+  },
+  "physics": {
+    "eos": "ideal",
+    "eosParams": {
+      "gamma": 1.4
+    },
+    "gravity": "off",
+    "G": 0,
+    "floors": {
+      "p": 1e-12
+    }
+  },
+  "background": {
+    "rho": 1,
+    "p": 0.01,
+    "v": [-19.59745, 0, 0]
+  },
+  "parts": [
+    {
+      "kind": "region",
+      "id": "left",
+      "shape": {
+        "type": "half",
+        "normal": [1, 0, 0],
+        "at": 0.3
+      },
+      "rho": 1,
+      "p": 1000,
+      "v": [-19.59745, 0, 0],
+      "s": 1
+    }
+  ],
+  "run": {
+    "tEnd": 0.012,
+    "checkpointDt": 0.0012000000000000001
+  },
+  "view": {
+    "mode": "slice",
+    "log": false
+  }
+}

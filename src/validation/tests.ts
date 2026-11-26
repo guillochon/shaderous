@@ -390,7 +390,7 @@ function l1VsExact(prof: Float64Array, tube: Tube, t: number, ds: number, relati
   const n = prof.length;
   let err = 0;
   for (let i = 0; i < n; i++) {
-    const s = (i + 0.5 - n / 2) * ds;
+    const s = (i + 0.5 - n / 2) * ds - tube.x0;
     const e = exact(s / t).rho;
     err += Math.abs(prof[i] - e) / (relative ? e : 1);
   }

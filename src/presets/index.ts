@@ -21,7 +21,10 @@ export const PRESET_ORDER: readonly string[] = [
   // Slow flows
   'taylor-green', 'shear-layers', 'cylinder-wake', 'wind-tunnel', 'wind-turbine', 'lid-driven-cavity', 'lid-driven-cavity-liquid', 'gresho',
   // Shocks and blasts
-  'sedov', 'sedov-rad', 'blast-axisymmetric', 'blast-spherical', 'sod-x', 'sod-y', 'sod-z', 'sod-diag', 'strong-shock', 'forward-step', 'shock-bubble',
+  'sedov', 'sedov-rad', 'blast-axisymmetric', 'blast-spherical', 'sod-x', 'sod-y', 'sod-z', 'sod-diag', 'strong-shock',
+  'riemann-einfeldt', 'riemann-stationary-contact', 'riemann-slow-shock', 'riemann-shock-contact-shock', 'riemann-leblanc',
+  'noh-spherical', 'noh-cylindrical', 'noh-planar', 'noh-cartesian', 'uniform-collapse-spherical', 'uniform-collapse-cylindrical', 'uniform-collapse-planar',
+  'forward-step', 'shock-bubble',
   'detonation-stable', 'detonation-pulsating', 'detonation-cellular', 'detonation-co',
   // Radiation
   'radiating-sphere', 'sedov-rad-transport', 'radiation-shadow', 'radiative-shock', 'radiative-shock-supercritical', 'radiation-star',
