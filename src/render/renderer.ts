@@ -322,9 +322,6 @@ export interface ProfileValues {
   solid: Uint8Array;
 }
 
-/** Profile readbacks kept between frames: three frames' worth of two fields each. */
-const PROFILE_STAGES = 6;
-
 export class Renderer {
   private device: GPUDevice;
   private ctx: GPUCanvasContext;
@@ -768,14 +765,16 @@ export class Renderer {
       return null;
     }
     const bytes = points.byteLength;
+    // Readbacks kept between frames: three frames' worth of each field read in one (its slot).
+    const most = 3 * Math.max(2, slot + 1, pass.views.length);
     let stage = this.profileStages.find((q) => !q.busy && q.buf.size >= bytes);
     if (!stage) {
       // A free one too small is let go. With three being read, a frame goes without; an API call takes one of its own.
       const small = this.profileStages.findIndex((q) => !q.busy);
       if (small >= 0) this.profileStages.splice(small, 1)[0].buf.destroy();
-      if (this.profileStages.length >= PROFILE_STAGES && !spare) return null;
+      if (this.profileStages.length >= most && !spare) return null;
       stage = { buf: d.createBuffer({ label: 'profile readback', size: bytes, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ }), busy: false };
-      if (this.profileStages.length < PROFILE_STAGES) this.profileStages.push(stage);
+      if (this.profileStages.length < most) this.profileStages.push(stage);
     }
     let bufs = this.profileBufs;
     if (!bufs || bufs.cap < n) {

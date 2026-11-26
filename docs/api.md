@@ -225,12 +225,9 @@ by `npm run gen`.
 | `cmap` | The view | Colormap |
 | `tf` | The view | Volume view: the opacity curve, as x:a points separated by commas |
 | `prof` | The view | Profile lines on show, at most 6: each x0,y0,x1,y1 (2D) or x0,y0,z0,x1,y1,z1 (3D) in fractions of the box, ; between lines |
-| `proff` | The view | The field plotted along the profile lines, an index into the fields (default: the one shown) |
-| `profsp` | The view | With proff a mass fraction: its species, by index |
-| `proflog` | The view | The profile plot’s value axis logarithmic (1) or linear (0); left out: as the field’s default |
-| `proff2` | The view | A second field plotted along the same profile lines (dashed, on an axis of its own), an index into the fields |
-| `profsp2` | The view | With proff2 a mass fraction: its species, by index |
-| `proflog2` | The view | The second field’s axis logarithmic (1) or linear (0); left out: as the field’s default |
+| `proff` | The view | The fields plotted along the profile lines, indices into the fields separated by commas, the first against the left axis (default: the one shown) |
+| `profsp` | The view | For each of proff, the species of a mass fraction, by index (commas; empty or 0 for other fields) |
+| `proflog` | The view | For each of proff, its axis logarithmic (1) or linear (0), or empty for the field’s default (commas) |
 <!-- /gen:link-keys -->
 
 Keys left out take the preset's defaults. A value that is unknown or out of range is ignored
@@ -615,11 +612,12 @@ mass fractions by name, when the run has species.
 A field along a straight line through the box, read by the same GPU code that draws the view: any
 field of `describe().fields` (Mach number, vorticity, plasma beta, radiation temperature, …), not
 only `slice`'s variables. The page's Profile tool draws the same lines and plots them: up to six
-at once, each in a colour of its own, their plots overlaid in one panel with one field for all,
-and optionally a second field along the same lines, dashed against an axis of its own on the
-right. A shareable link carries them (keys `prof`, `proff`, `profsp`, `proflog`, and `proff2`,
-`profsp2`, `proflog2` for the second field). Here each call reads one field: call again with
-another `field` for a second along the same line.
+at once, each in a colour of its own, their plots overlaid in one panel, with as many fields
+along them as the run offers: the first solid against the left axis, the others each in a line
+pattern of its own, the second against an axis on the right and the rest on their own scales.
+A shareable link carries them (keys `prof`; `proff`, `profsp` and `proflog`, lists with one
+entry a field). Here each call reads one field: call again with another `field` for more along
+the same line.
 
 - `from`, `to`: the line's ends, `[x, y]` or `[x, y, z]` in fractions of the box. The line is
   clipped to the box; one that misses it is an error. Both left out: a line the Profile tool

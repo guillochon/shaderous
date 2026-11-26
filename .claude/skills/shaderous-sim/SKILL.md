@@ -25,7 +25,7 @@ A setup is described with the same keys as a share link (`describe` gives each o
 <!-- gen:link-key-list -->
 - The run: `problem`, `setup`, `dim`, `n`, `amr`
 - Settings, each an override of the preset's own: `tend`, `sym`, `eos`, `material`, `gamma`, `K`, `lc`, `lrho`, `arad`, `degrho`, `degp`, `coulomb`, `hherad`, `iont`, `ionrho`, `frho`, `fu`, `fv`, `fva`, `cool`, `crate`, `calpha`, `cheat`, `ctunit`, `ctfloor`, `rad`, `kap`, `kapa`, `kaps`, `kapk`, `kapt`, `clight`, `chat`, `clocal`, `radflux`, `rsweeps`, `nu`, `kappa`, `eta`, `drive`, `dtau`, `dkmin`, `dkmax`, `dzeta`, `dseed`, `gravity`, `G`, `vcycles`, `jfloor`, `jcells`, `fluxwork`, `refhi`, `reflo`, `refrho`, `tbins`, `riemann`, `limiter`, `cfl`, `sdr`, `sdt`, `psplit`, `cut`, `pcycles`, `ptol`, `acfl`, `dampr`, `damprate`, `wb`, `bc`, `p.<id>`
-- The view: `mode`, `field`, `species`, `log`, `lo`, `hi`, `axis`, `slice`, `rhocut`, `opacity`, `yaw`, `pitch`, `dist`, `tx`, `ty`, `tz`, `zoom`, `cx`, `cy`, `blocks`, `contours`, `ncont`, `fog`, `isoa`, `exact`, `light`, `box`, `flines`, `nflines`, `flfloor`, `mirror`, `turn`, `cmap`, `tf`, `prof`, `proff`, `profsp`, `proflog`, `proff2`, `profsp2`, `proflog2`
+- The view: `mode`, `field`, `species`, `log`, `lo`, `hi`, `axis`, `slice`, `rhocut`, `opacity`, `yaw`, `pitch`, `dist`, `tx`, `ty`, `tz`, `zoom`, `cx`, `cy`, `blocks`, `contours`, `ncont`, `fog`, `isoa`, `exact`, `light`, `box`, `flines`, `nflines`, `flfloor`, `mirror`, `turn`, `cmap`, `tf`, `prof`, `proff`, `profsp`, `proflog`
 <!-- /gen:link-key-list -->
 
 Also `p.<param>` for a preset's own parameters. Unknown keys are ignored and out-of-range

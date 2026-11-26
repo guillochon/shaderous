@@ -119,16 +119,16 @@ describe('the plot', () => {
   });
 
   it('writes CSV with its header quoted where it must be', () => {
-    expect(profileCsv([{ s: [0, 1], values: [2, 3], levels: [0, 1] }], { distance: 'distance (cm)', value: 'X(He, 4)' })).toBe('distance (cm),"X(He, 4)",level\n0,2,0\n1,3,1\n');
+    expect(profileCsv([{ s: [0, 1], values: [[2, 3]], levels: [0, 1] }], { distance: 'distance (cm)', values: ['X(He, 4)'] })).toBe('distance (cm),"X(He, 4)",level\n0,2,0\n1,3,1\n');
   });
 
-  it('puts a second field in a column of its own, empty where a line has none', () => {
-    const csv = profileCsv([{ s: [0, 1], values: [2, 3], values2: [7, 8], levels: [0, 0] }, { s: [0], values: [5], levels: [1] }], { distance: 'distance', value: 'Density', value2: 'Pressure' });
-    expect(csv).toBe('line,distance,Density,Pressure,level\n1,0,2,7,0\n1,1,3,8,0\n2,0,5,,1\n');
+  it('puts each field in a column of its own, empty where a line has none', () => {
+    const csv = profileCsv([{ s: [0, 1], values: [[2, 3], [7, 8], [9, 10]], levels: [0, 0] }, { s: [0], values: [[5], null, [11]], levels: [1] }], { distance: 'distance', values: ['Density', 'Pressure', 'Mach number'] });
+    expect(csv).toBe('line,distance,Density,Pressure,Mach number,level\n1,0,2,7,9,0\n1,1,3,8,10,0\n2,0,5,,11,1\n');
   });
 
   it('numbers the lines in CSV when there are several', () => {
-    const csv = profileCsv([{ s: [0, 1], values: [2, 3], levels: [0, 0] }, { s: [0], values: [5], levels: [1] }], { distance: 'distance', value: 'Density' });
+    const csv = profileCsv([{ s: [0, 1], values: [[2, 3]], levels: [0, 0] }, { s: [0], values: [[5]], levels: [1] }], { distance: 'distance', values: ['Density'] });
     expect(csv).toBe('line,distance,Density,level\n1,0,2,0\n1,1,3,0\n2,0,5,1\n');
   });
 });
@@ -155,7 +155,7 @@ describe('profile lines in a link', () => {
     const problem = problemOf('sedov');
     const cfg = configFor(problem, 256, { ndim: 2, amrLevels: 0 });
     const view = viewDefaults(problem, 2);
-    const q = encodeLink({ cfg, view, auto: true, colormap: 'inferno', opacity: defaultOpacity(), profiles: { lines: [[[0.5, 0.5, 0], [1, 0.5, 0]], [[0.5, 0.5, 0], [1, 1, 0]]], field: 3, species: 0, log: false } });
+    const q = encodeLink({ cfg, view, auto: true, colormap: 'inferno', opacity: defaultOpacity(), profiles: { lines: [[[0.5, 0.5, 0], [1, 0.5, 0]], [[0.5, 0.5, 0], [1, 1, 0]]], fields: [{ field: 3, species: 0, log: false }] } });
     expect(q.get('prof')).toBe('0.5,0.5,1,0.5;0.5,0.5,1,1');
     expect(q.get('proff')).toBe('3');
     expect(q.get('proflog')).toBe('0');
@@ -163,13 +163,22 @@ describe('profile lines in a link', () => {
     const report: LinkReport = { ignored: [] };
     const back = decodeLink(q, report);
     expect(report.ignored).toEqual([]);
-    expect(back.profiles).toEqual({ lines: [[[0.5, 0.5, 0], [1, 0.5, 0]], [[0.5, 0.5, 0], [1, 1, 0]]], field: 3, log: false });
-    // A second field along the same lines.
-    const q2 = encodeLink({ cfg, view, auto: true, colormap: 'inferno', opacity: defaultOpacity(), profiles: { lines: [[[0.5, 0.5, 0], [1, 0.5, 0]]], field: 0, field2: 3, log2: true } });
-    expect([q2.get('proff2'), q2.get('proflog2')]).toEqual(['3', '1']);
+    expect(back.profiles).toEqual({ lines: [[[0.5, 0.5, 0], [1, 0.5, 0]], [[0.5, 0.5, 0], [1, 1, 0]]], fields: [{ field: 3, log: false }] });
+    // Several fields along the same lines, their scales where set.
+    const fields = [{ field: 0, log: null }, { field: 3, log: true }, { field: 8, log: null }];
+    const q2 = encodeLink({ cfg, view, auto: true, colormap: 'inferno', opacity: defaultOpacity(), profiles: { lines: [[[0.5, 0.5, 0], [1, 0.5, 0]]], fields } });
+    expect([q2.get('proff'), q2.get('proflog'), q2.has('profsp')]).toEqual(['0,3,8', ',1,', false]);
     const r2: LinkReport = { ignored: [] };
-    expect(decodeLink(q2, r2).profiles).toEqual({ lines: [[[0.5, 0.5, 0], [1, 0.5, 0]]], field: 0, field2: 3, log2: true });
+    expect(decodeLink(q2, r2).profiles).toEqual({ lines: [[[0.5, 0.5, 0], [1, 0.5, 0]]], fields: [{ field: 0 }, { field: 3, log: true }, { field: 8 }] });
     expect(r2.ignored).toEqual([]);
+    // A second field as links had it for a while (proff2), read after the first.
+    const r3: LinkReport = { ignored: [] };
+    expect(decodeLink(new URLSearchParams('problem=sedov&dim=2&n=256&prof=0.5,0.5,1,0.5&proff=0&proff2=3&proflog2=1'), r3).profiles?.fields).toEqual([{ field: 0 }, { field: 3, log: true }]);
+    expect(r3.ignored).toEqual([]);
+    // A list that is not one is reported.
+    const r4: LinkReport = { ignored: [] };
+    expect(decodeLink(new URLSearchParams('problem=sedov&dim=2&n=256&prof=0.5,0.5,1,0.5&proff=0,x'), r4).profiles?.fields).toBeUndefined();
+    expect(r4.ignored.join()).toMatch(/^proff=/);
     // No lines, no keys.
     expect(encodeLink({ cfg, view, auto: true, colormap: 'inferno', opacity: defaultOpacity() }).has('prof')).toBe(false);
   });

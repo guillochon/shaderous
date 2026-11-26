@@ -90,18 +90,20 @@ export function resolveField(spec: string | number | undefined, species: readonl
 }
 
 /**
- * Profiles as CSV: distance, value and refinement level, one sample a row, and a second field's
- * value after the first's when there is one (`head.value2`; a line without it leaves the column
- * empty). With several lines, a first column numbers them (from 1), their rows one line after
- * another.
+ * Profiles as CSV: distance, then each field's value (`head.values`, one column a field, in the
+ * order given; a line without a field's samples leaves its column empty), then the refinement
+ * level, one sample a row. With several lines, a first column numbers them (from 1), their rows
+ * one line after another.
  */
-export function profileCsv(lines: { s: ArrayLike<number>; values: ArrayLike<number>; values2?: ArrayLike<number>; levels: ArrayLike<number> }[], head: { distance: string; value: string; value2?: string }): string {
+export function profileCsv(lines: { s: ArrayLike<number>; values: (ArrayLike<number> | null | undefined)[]; levels: ArrayLike<number> }[], head: { distance: string; values: string[] }): string {
   const q = (x: string) => (/[",\n]/.test(x) ? `"${x.replace(/"/g, '""')}"` : x);
   const several = lines.length > 1;
-  const two = head.value2 !== undefined;
-  const rows = [`${several ? 'line,' : ''}${q(head.distance)},${q(head.value)},${two ? `${q(head.value2!)},` : ''}level`];
+  const rows = [`${several ? 'line,' : ''}${[head.distance, ...head.values].map(q).join(',')},level`];
   lines.forEach((l, j) => {
-    for (let i = 0; i < l.s.length; i++) rows.push(`${several ? `${j + 1},` : ''}${l.s[i]},${l.values[i]},${two ? `${l.values2?.[i] ?? ''},` : ''}${l.levels[i]}`);
+    for (let i = 0; i < l.s.length; i++) {
+      const vals = head.values.map((_, k) => l.values[k]?.[i] ?? '');
+      rows.push(`${several ? `${j + 1},` : ''}${l.s[i]},${vals.join(',')},${l.levels[i]}`);
+    }
   });
   return rows.join('\n') + '\n';
 }
@@ -128,6 +130,12 @@ export function ticks(lo: number, hi: number, want = 4): number[] {
 export const PROFILE_COLORS = ['#ffe066', '#33d6ff', '#ff6fae', '#7dff7a', '#ff9f43', '#b18cff'];
 /** The most lines on show at once. */
 export const MAX_PROFILES = PROFILE_COLORS.length;
+/**
+ * The fields' line patterns, in the order the panel lists them (as canvas line dashes): the
+ * first solid, then dashed, dotted, dash-dot and so on, again from the second past the last.
+ */
+export const PROFILE_DASHES: number[][] = [[], [6, 3], [1.5, 2.5], [8, 2.5, 1.5, 2.5], [12, 3], [3, 2, 1, 2, 1, 2], [4, 4, 1, 4]];
+export const profileDash = (k: number) => (k < PROFILE_DASHES.length ? PROFILE_DASHES[k] : PROFILE_DASHES[1 + ((k - 1) % (PROFILE_DASHES.length - 1))]);
 
 /** One line's samples in the plot: distance and value of each (displayed units). */
 export interface ProfileSeries {
@@ -148,8 +156,11 @@ export interface ProfilePlot {
   range?: [number, number] | null;
   /** a distance to mark (the one hovered), or null */
   mark?: number | null;
-  /** a second field along the same lines: dashed, against an axis of its own on the right */
-  second?: { series: ProfileSeries[]; log: boolean; range?: [number, number] | null } | null;
+  /**
+   * More fields along the same lines, each in its pattern (profileDash, from the second): the
+   * first of them against an axis on the right, the rest each on its own range, unlabelled.
+   */
+  more?: { series: ProfileSeries[]; log: boolean; range?: [number, number] | null }[];
   colors: { dim: string; frame: string; mark: string };
 }
 
@@ -201,8 +212,8 @@ interface Axis {
 
 /** Draw the plot into a 2D context of CSS size w x h. */
 export function drawProfilePlot(ctx: CanvasRenderingContext2D, w: number, h: number, p: ProfilePlot) {
-  const second = p.second ? p.second.series.filter((q) => q.s.length >= 2) : null;
-  const m = plotMargin(!!p.second);
+  const more = (p.more ?? []).map((f) => ({ ...f, series: f.series.filter((q) => q.s.length >= 2) }));
+  const m = plotMargin(more.length > 0);
   const [x0, y0, pw, ph] = [m.left, m.top, w - m.left - m.right, h - m.top - m.bottom];
   ctx.clearRect(0, 0, w, h);
   ctx.strokeStyle = p.colors.frame;
@@ -212,7 +223,7 @@ export function drawProfilePlot(ctx: CanvasRenderingContext2D, w: number, h: num
   ctx.fillStyle = p.colors.dim;
   const series = p.series.filter((q) => q.s.length >= 2);
   const range = p.range ?? seriesRange(series, p.log);
-  const sb = plotLength([...series, ...(second ?? [])]);
+  const sb = plotLength([...series, ...more.flatMap((f) => f.series)]);
   if (!series.length || !range || !(sb > 0) || pw < 10 || ph < 10) {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
@@ -228,8 +239,12 @@ export function drawProfilePlot(ctx: CanvasRenderingContext2D, w: number, h: num
     of: (v: number) => (log ? (v > 0 ? Math.log10(v) : NaN) : v),
   });
   const left = axis(range, p.log);
-  const range2 = p.second && second?.length ? (p.second.range ?? seriesRange(second, p.second.log)) : null;
-  const right = range2 ? axis(range2, p.second!.log) : null;
+  // Each further field's axis, on its own range (the first of them labelled on the right).
+  const axes = more.map((f) => {
+    const r = f.series.length ? (f.range ?? seriesRange(f.series, f.log)) : null;
+    return r ? axis(r, f.log) : null;
+  });
+  const right = axes[0] ?? null;
 
   // Ticks: on a log scale at whole decades when there are a few, else as on a linear one. The
   // grid follows the left axis; the right one has its labels alone, with a tick on the frame.
@@ -307,7 +322,10 @@ export function drawProfilePlot(ctx: CanvasRenderingContext2D, w: number, h: num
     ctx.setLineDash([]);
   };
   curves(series, left, []);
-  if (right && second) curves(second, right, [5, 3]);
+  more.forEach((f, k) => {
+    const a = axes[k];
+    if (a) curves(f.series, a, profileDash(k + 1));
+  });
   ctx.restore();
 
   const at = p.mark ?? null;
@@ -341,7 +359,10 @@ export function drawProfilePlot(ctx: CanvasRenderingContext2D, w: number, h: num
       }
     };
     dots(series, left, false);
-    if (right && second) dots(second, right, true);
+    more.forEach((f, k) => {
+      const a = axes[k];
+      if (a) dots(f.series, a, true);
+    });
   }
 }
 

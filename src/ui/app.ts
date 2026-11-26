@@ -20,7 +20,7 @@ import { initialFaces } from '../mhd/mhd';
 import { blockFaces } from '../mhd/amr_mhd';
 import type { Block } from '../amr/tree';
 import { boxFrac, fracPos, gridDims } from '../domain';
-import { clipSegment, distanceAt, distances, drawProfilePlot, MAX_PROFILES, plotLength, PROFILE_COLORS, profileCsv, resolveField, sampleCount, sampleNear, samplePoints, seriesRange } from './profile';
+import { clipSegment, distanceAt, distances, drawProfilePlot, MAX_PROFILES, plotLength, PROFILE_COLORS, profileCsv, profileDash, resolveField, sampleCount, sampleNear, samplePoints, seriesRange } from './profile';
 import { radiationOn, syncRadiationEos } from '../radiation/radiation';
 import { cellEquations, importance, rampColor, type Equation } from './terms';
 import { opacity as meanOpacity } from '../opacity/opacity';
@@ -3388,8 +3388,10 @@ function locateInView(px: number, py: number, depth: number): { pos: Vec3; right
 // on the gas seen under the pointer (the end then on the plane through the start, Alt again
 // putting it on the gas too). Each new line is added to those on show (up to MAX_PROFILES), in a
 // colour of its own; they stay on show, whatever tool is in hand, with their plots overlaid in
-// one panel, one field for all, until the panel is closed. The GPU samples the field along all
-// of them in one pass (Renderer.encodeProfile), frame by frame while the run goes.
+// one panel until the panel is closed. The panel plots one field or several along every line:
+// the first solid against the left axis, the others each in a pattern of its own (profileDash),
+// the second against an axis on the right. The GPU samples each field along all the lines in one
+// pass (Renderer.encodeProfile), frame by frame while the run goes.
 /** A line on show: its ends in fractions of the computed box, its colour, and its samples as last read. */
 interface PlacedProfile {
   a: Vec3;
@@ -3398,15 +3400,18 @@ interface PlacedProfile {
   dims: 2 | 3;
   /** index into PROFILE_COLORS */
   color: number;
-  data: ProfileSamples | null;
-  /** the second field's samples (profileField2) */
-  data2: ProfileSamples | null;
+  /** the samples last read along it, one a field (samplesOf picks the one of a field) */
+  data: ProfileSamples[];
 }
 let profiles: PlacedProfile[] = [];
-/** The field plotted along every line, and the log axis (null: as the field's default). */
-const profileField: { field: number; species: number; log: boolean | null } = { field: 0, species: 0, log: null };
-/** A second field along the same lines, plotted dashed against an axis of its own; null: none. */
-let profileField2: { field: number; species: number; log: boolean | null } | null = null;
+/** A field plotted along the lines, and its log axis (null: as the field's default). */
+interface ProfileFieldChoice {
+  field: number;
+  species: number;
+  log: boolean | null;
+}
+/** The fields plotted along every line, in the panel's order: the first against the left axis. Never empty. */
+let profileFields: ProfileFieldChoice[] = [{ field: 0, species: 0, log: null }];
 /** Lines set by a link before their run was built: the panel opens on the first frame of the run. */
 let profileOpenPending = false;
 /** The samples read along a line. */
@@ -3437,10 +3442,8 @@ let profileLineCache: { key: string; points: Float32Array<ArrayBuffer>; lines: {
 let profileAt = 0;
 /** The distance hovered (code length), in the plot or on a line (`line`, -1 from the plot); null: none. */
 let profileHover: { s: number; line: number } | null = null;
-/** The plot's y range, eased while the run goes (`at` when last eased); reset when the field or the scale changes. */
-let profileRange: { key: string; range: [number, number]; at: number } | null = null;
-/** The second field's axis, eased as the first's. */
-let profileRange2: { key: string; range: [number, number]; at: number } | null = null;
+/** Each field's y range, eased while the run goes (`at` when last eased); started again when its field or scale changes (`key`). */
+let profileRanges: ({ key: string; range: [number, number]; at: number } | null)[] = [];
 /**
  * A line being placed: the press (CSS pixels), its start in the box once known (in the volume
  * view the gas under the press is read back first), how deep the start lies along the view, the
@@ -3625,7 +3628,7 @@ function finishDraft() {
     return;
   }
   // The first line plots the field the view shows; later ones plot the panel's.
-  if (!profiles.length) Object.assign(profileField, { field: view.field, species: view.species, log: null });
+  if (!profiles.length) profileFields = [{ field: view.field, species: view.species, log: null }];
   addProfile(c[0], c[1]);
   openProfilePop(true);
 }
@@ -3634,9 +3637,9 @@ function finishDraft() {
 function addProfile(a: Vec3, b: Vec3, data: ProfileSamples | null = null): PlacedProfile {
   const used = new Set(profiles.map((p) => p.color));
   const color = Math.max(0, PROFILE_COLORS.findIndex((_, i) => !used.has(i)));
-  const p: PlacedProfile = { a, b, dims: cfg.ndim, color, data, data2: null };
+  const p: PlacedProfile = { a, b, dims: cfg.ndim, color, data: data ? [data] : [] };
   profiles.push(p);
-  profileRange = null;
+  profileRanges = [];
   profileHover = null;
   requestProfile();
   syncProfileLines();
@@ -3650,7 +3653,7 @@ function removeProfile(i: number) {
   profiles.splice(i, 1);
   profileGrab = null;
   profileHover = null;
-  profileRange = null;
+  profileRanges = [];
   requestProfile();
   syncProfileLines();
   drawProfilePop();
@@ -3664,7 +3667,7 @@ function closeProfile() {
   profileGrab = null;
   profileHover = null;
   profileOpenPending = false;
-  profileField2 = null;
+  profileFields = [profileFields[0]];
   profilePop.hidden = true;
   drawProfileLine();
 }
@@ -3674,10 +3677,9 @@ function closeProfile() {
  * is, the panel opened on its first frame. The field defaults to the one the view shows.
  */
 function setLinkProfiles(lp: LinkProfiles, ndim: 2 | 3) {
-  profiles = lp.lines.slice(0, MAX_PROFILES).map(([a, b], i) => ({ a: [...a] as Vec3, b: [...b] as Vec3, dims: ndim, color: i, data: null, data2: null }));
-  Object.assign(profileField, { field: lp.field ?? view.field, species: lp.species ?? (lp.field === undefined ? view.species : 0), log: lp.log ?? null });
-  profileField2 = lp.field2 === undefined ? null : { field: lp.field2, species: lp.species2 ?? 0, log: lp.log2 ?? null };
-  profileRange = null;
+  profiles = lp.lines.slice(0, MAX_PROFILES).map(([a, b], i) => ({ a: [...a] as Vec3, b: [...b] as Vec3, dims: ndim, color: i, data: [] }));
+  profileFields = lp.fields?.length ? lp.fields.map((f) => ({ field: f.field, species: f.species ?? 0, log: f.log ?? null })) : [{ field: view.field, species: view.species, log: null }];
+  profileRanges = [];
   profileHover = null;
   profileDraft = null;
   profileGrab = null;
@@ -3689,12 +3691,7 @@ function setLinkProfiles(lp: LinkProfiles, ndim: 2 | 3) {
 /** The lines on show as a link carries them, or undefined with none. */
 function linkProfiles(): LinkProfiles | undefined {
   if (!profiles.length) return undefined;
-  const f2 = profileField2;
-  return {
-    lines: profiles.map((p) => [p.a, p.b] as [Vec3, Vec3]),
-    field: profileField.field, species: profileField.species, log: profileField.log,
-    ...(f2 ? { field2: f2.field, species2: f2.species, log2: f2.log } : {}),
-  };
+  return { lines: profiles.map((p) => [p.a, p.b] as [Vec3, Vec3]), fields: profileFields.map((f) => ({ ...f })) };
 }
 
 /** Whether the view's menu offers a field in this run (not disabled, nor hidden with its group). */
@@ -3717,7 +3714,7 @@ function profileLineHover(e: PointerEvent | null) {
     const at = projector();
     let best = 6;
     profiles.forEach((p, i) => {
-      const d = p.data;
+      const d = samplesOf(p, 0);
       if (!d) return;
       const [A, B] = [at(p.a), at(p.b)];
       const [dx, dy] = [B.x - A.x, B.y - A.y];
@@ -3765,7 +3762,7 @@ function drawProfileLine() {
         ticks += `M${c.x - h * nx} ${c.y - h * ny}L${c.x + h * nx} ${c.y + h * ny}`;
       }
       let g = seg(A, B) + `<path class="ticks" d="${ticks}" />`;
-      const d = p.data;
+      const d = samplesOf(p, 0);
       if (profileHover && d && d.length > 0 && profileHover.s <= d.length) {
         const t = profileHover.s / d.length;
         const c = at(p.a.map((v, j) => v + t * (p.b[j] - v)));
@@ -3823,8 +3820,8 @@ function encodeFrameProfile(now: number, enc: GPUCommandEncoder, s: Simulation):
   if (profileOpenPending) {
     // Lines from a link: a field this run does not offer gives way to the one shown.
     profileOpenPending = false;
-    if (!fieldOffered(profileField.field) || (cfg.viewBaked && profileField.field !== view.field)) Object.assign(profileField, { field: view.field, species: view.species, log: null });
-    if (profileField2 && (!fieldOffered(profileField2.field) || cfg.viewBaked)) profileField2 = null;
+    const kept = profileFields.filter((f) => fieldOffered(f.field) && !(cfg.viewBaked && f.field !== view.field));
+    profileFields = kept.length ? (cfg.viewBaked ? kept.slice(0, 1) : kept) : [{ field: view.field, species: view.species, log: null }];
     syncProfileLines();
     openProfilePop(true);
     drawProfileLine();
@@ -3845,33 +3842,30 @@ function encodeFrameProfile(now: number, enc: GPUCommandEncoder, s: Simulation):
     profileLineCache = { key, points, lines };
   }
   const cache = profileLineCache;
-  const o = { field: profileField.field, species: profileField.species, projection: projecting() ? view.sliceAxis : null };
-  let read: (() => Promise<ProfileValues>) | null;
-  try {
-    read = renderer.encodeProfile(enc, s, cache.points, key, o);
-  } catch {
-    return null; // the view is not attached to this run yet
-  }
-  if (!read) return null; // compiling, or every readback busy: the next frame tries again
-  // The second field: the same points, a pass of its own (its own slot for its settings). Left
-  // for the next frame if no readback is free.
-  const f2 = profileField2;
-  const o2 = f2 ? { field: f2.field, species: f2.species, projection: o.projection } : null;
-  let read2: (() => Promise<ProfileValues>) | null = null;
-  if (o2) {
+  // One pass a field, each with a slot of its own for its settings (they all reach the queue
+  // before any pass runs). The first must go; a later one with no readback free is left for the
+  // next frame.
+  const projection = projecting() ? view.sliceAxis : null;
+  const opts = profileFields.map((f) => ({ field: f.field, species: f.species, projection }));
+  const reads: ((() => Promise<ProfileValues>) | null)[] = [];
+  for (const [k, o] of opts.entries()) {
+    let read: (() => Promise<ProfileValues>) | null;
     try {
-      read2 = renderer.encodeProfile(enc, s, cache.points, key, o2, false, 1);
+      read = renderer.encodeProfile(enc, s, cache.points, key, o, false, k);
     } catch {
-      read2 = null;
+      if (k === 0) return null; // the view is not attached to this run yet
+      read = null;
     }
+    if (!read && k === 0) return null; // compiling, or every readback busy: the next frame tries again
+    reads.push(read);
   }
-  profileWanted = !!o2 && !read2;
+  profileWanted = reads.some((r) => !r);
   profileAt = now;
   const seq = ++profileSeq;
   const owners = profiles.slice();
   return () => {
-    Promise.all([read(), read2 ? read2() : null])
-      .then(([r, r2]) => {
+    Promise.all(reads.map((r) => (r ? r() : null)))
+      .then((got) => {
         if (seq < profileShown || s !== sim) return;
         profileShown = seq;
         owners.forEach((p, i) => {
@@ -3879,9 +3873,12 @@ function encodeFrameProfile(now: number, enc: GPUCommandEncoder, s: Simulation):
           if (!profiles.includes(p)) return;
           const l = cache.lines[i];
           const cut = <T extends Float32Array | Uint8Array>(v: T) => v.subarray(l.at, l.at + l.n) as T;
-          const samples = (q: ProfileValues, of: typeof o): ProfileSamples => ({ a: l.a, b: l.b, ...of, s: l.s, length: l.s[l.n - 1], values: cut(q.values), levels: cut(q.levels), solid: cut(q.solid) });
-          p.data = samples(r, o);
-          if (r2 && o2) p.data2 = samples(r2, o2);
+          // A field not read this time keeps what it had.
+          const fresh: ProfileSamples[] = [];
+          got.forEach((q, k) => {
+            if (q) fresh.push({ a: l.a, b: l.b, ...opts[k], s: l.s, length: l.s[l.n - 1], values: cut(q.values), levels: cut(q.levels), solid: cut(q.solid) });
+          });
+          p.data = [...fresh, ...p.data.filter((d) => !fresh.some((f) => f.field === d.field && f.species === d.species))];
         });
         // (The view's menu may have changed with the run: a new one loaded with the panel open.)
         syncProfileMenu();
@@ -3909,24 +3906,25 @@ function profileFieldName(field: number, species: number, projected: boolean): s
 /** What a profiled field measures: density projected is a column density. */
 const profileMeasure = (field: number, projected: boolean): Measure => (projected && field === 0 ? [1, -2, 0] : fieldMeasure(field, cfg.eosParams.gamma));
 /** A field's value axis is logarithmic: as chosen, or as the view shows the field (fields of either sign never). */
-function profileLog(p: { field: number; log: boolean | null } = profileField): boolean {
+function profileLog(p: { field: number; log: boolean | null } = profileFields[0]): boolean {
   if (LINEAR_FIELDS.has(p.field)) return false;
   if (p.log !== null) return p.log;
   return p.field === view.field ? view.log : true;
 }
-/** Each line's samples as last read, if they are of the field plotted. */
-const profileSamples = (p: PlacedProfile) => (p.data && p.data.field === profileField.field && p.data.species === profileField.species ? p.data : null);
-/** Each line's samples of the second field, if there is one and they are of it. */
-const profileSamples2 = (p: PlacedProfile) => {
-  const f = profileField2;
-  return f && p.data2 && p.data2.field === f.field && p.data2.species === f.species ? p.data2 : null;
-};
+/** A line's samples of the k-th field plotted, as last read, if there are any. */
+function samplesOf(p: PlacedProfile, k: number): ProfileSamples | null {
+  const f = profileFields[k];
+  return (f && p.data.find((d) => d.field === f.field && d.species === f.species)) || null;
+}
+/** Each line's samples of the first field. */
+const profileSamples = (p: PlacedProfile) => samplesOf(p, 0);
+/** A field's value in the panel's menus: its index, a mass fraction's with its species. */
+const fieldValue = (f: { field: number; species: number }) => (f.field === MASS_FRACTION_FIELD ? `${MASS_FRACTION_FIELD}:${f.species}` : String(f.field));
 
 // The panel: the field, the scale, the plot, and the lines' ends.
 const profilePop = $('profile-pop');
 const profileCanvas = profilePop.querySelector('canvas')!;
-const profileSel = $<HTMLSelectElement>('profile-field');
-const profileSel2 = $<HTMLSelectElement>('profile-field2');
+const profileRows = $('profile-fields');
 /** The panel has been moved by hand: it stays where it was put. */
 let profilePopMoved = false;
 
@@ -3959,40 +3957,64 @@ function openProfilePop(place: boolean) {
   drawProfilePop();
 }
 
-/** The panel's field menu: the view's, with what this run cannot show left out. */
+/**
+ * The panel's fields, a row each: its pattern, its menu (the view's, with what this run cannot
+ * show left out, and the fields of the other rows), its log switch and a button to remove it.
+ * The rows are made again when their number or the view's menu changes, and set every time.
+ */
+let profileRowsFor = '';
 function syncProfileMenu() {
   if (!profiles.length) return;
   const main = $<HTMLSelectElement>('field');
-  if (profileSel.dataset.from !== main.innerHTML) {
-    profileSel.innerHTML = main.innerHTML;
-    profileSel.dataset.from = main.innerHTML;
-    // The second field's menu: the same, after a choice of none.
-    profileSel2.innerHTML = `<option value="">No second field</option>${main.innerHTML}`;
+  const n = profileFields.length;
+  const rowsKey = `${n}|${main.innerHTML}`;
+  if (profileRowsFor !== rowsKey) {
+    profileRowsFor = rowsKey;
+    profileRows.innerHTML = profileFields
+      .map((_, k) => {
+        const dash = profileDash(k).join(' ');
+        return `<div class="frow" data-k="${k}"><svg class="dash" viewBox="0 0 22 8" aria-hidden="true"><line x1="1" y1="4" x2="21" y2="4"${dash ? ` stroke-dasharray="${dash}"` : ''} /></svg><select data-k="${k}" aria-label="Field ${k + 1}">${main.innerHTML}</select><label title="A logarithmic axis for this field"><input type="checkbox" data-log="${k}" /> log</label><button type="button" data-rm="${k}" title="Stop plotting this field" aria-label="Remove field ${k + 1}">&times;</button></div>`;
+      })
+      .join('');
+    // A row more makes the panel taller: kept on screen.
+    const r = profilePop.getBoundingClientRect();
+    if (!profilePop.hidden && !phone.matches && r.bottom > window.innerHeight - 4) profilePop.style.top = `${Math.round(Math.max(4, window.innerHeight - 4 - r.height))}px`;
   }
-  // (The options' states as the view's menu holds them now.)
-  for (const [i, o] of [...main.options].entries()) {
-    for (const q of [profileSel.options[i], profileSel2.options[i + 1]]) {
+  const used = profileFields.map(fieldValue);
+  profileFields.forEach((f, k) => {
+    const row = profileRows.querySelector<HTMLElement>(`.frow[data-k="${k}"]`);
+    if (!row) return;
+    const sel = row.querySelector('select')!;
+    // (The options' states as the view's menu holds them now; a field another row plots, off.)
+    for (const [i, o] of [...main.options].entries()) {
+      const q = sel.options[i];
       if (!q) continue;
-      q.disabled = o.disabled;
+      q.disabled = o.disabled || (used.includes(q.value) && q.value !== used[k]);
       q.hidden = o.hidden;
     }
-  }
-  const f = profileField;
-  profileSel.value = f.field === MASS_FRACTION_FIELD ? `${MASS_FRACTION_FIELD}:${f.species}` : String(f.field);
-  // A view that holds one field has only that one on the GPU.
-  profileSel.disabled = !!cfg.viewBaked;
-  profileSel.title = cfg.viewBaked ? 'A view that holds one field can profile only that field: change the field shown to profile another' : 'The field plotted along the lines';
-  const log = $<HTMLInputElement>('profile-log');
-  log.checked = profileLog();
-  log.disabled = LINEAR_FIELDS.has(f.field);
-  const f2 = profileField2;
-  profileSel2.value = !f2 ? '' : f2.field === MASS_FRACTION_FIELD ? `${MASS_FRACTION_FIELD}:${f2.species}` : String(f2.field);
-  profileSel2.disabled = !!cfg.viewBaked;
-  profileSel2.title = cfg.viewBaked ? 'A view that holds one field can profile only that field' : 'A second field along the same lines: dashed, against the axis on the right';
-  const log2 = $<HTMLInputElement>('profile-log2');
-  log2.closest('label')!.hidden = !f2;
-  log2.checked = !!f2 && profileLog(f2);
-  log2.disabled = !f2 || LINEAR_FIELDS.has(f2.field);
+    sel.value = used[k];
+    // A view that holds one field has only that one on the GPU.
+    sel.disabled = !!cfg.viewBaked;
+    sel.title = cfg.viewBaked
+      ? 'A view that holds one field can profile only that field: change the field shown to profile another'
+      : k === 0 ? 'The field plotted along the lines, against the left axis' : k === 1 ? 'A field plotted along the same lines, against the axis on the right' : 'A field plotted along the same lines, on its own scale (hover the plot to read it)';
+    const log = row.querySelector<HTMLInputElement>('input[data-log]')!;
+    log.checked = profileLog(f);
+    log.disabled = LINEAR_FIELDS.has(f.field);
+    row.querySelector<HTMLElement>('button[data-rm]')!.style.visibility = n > 1 ? '' : 'hidden';
+  });
+  // A field more: while the run offers one no row plots.
+  const add = $<HTMLButtonElement>('profile-add');
+  add.disabled = !!cfg.viewBaked || !nextProfileField();
+}
+
+/** The first field the run offers that no row plots yet, or null. */
+function nextProfileField(): ProfileFieldChoice | null {
+  const used = profileFields.map(fieldValue);
+  const o = [...$<HTMLSelectElement>('field').options].find((q) => !q.disabled && !q.hidden && !(q.parentElement as HTMLOptGroupElement | null)?.hidden && !used.includes(q.value));
+  if (!o) return null;
+  const [field, species] = o.value.split(':').map(Number);
+  return { field, species: species || 0, log: null };
 }
 
 /** The panel's list of lines (with two or more): each one's colour and number, to swap its ends or remove it. */
@@ -4019,39 +4041,39 @@ function swapProfile(i: number) {
   drawProfileLine();
 }
 
-profileSel.addEventListener('change', () => {
+profileRows.addEventListener('change', (e) => {
+  const t = e.target as HTMLElement;
   if (!profiles.length) return;
-  const [f, k] = profileSel.value.split(':').map(Number);
-  Object.assign(profileField, { field: f, species: k || 0, log: null });
-  profileRange = null;
+  if (t instanceof HTMLSelectElement && t.dataset.k !== undefined) {
+    const k = Number(t.dataset.k);
+    const [field, species] = t.value.split(':').map(Number);
+    profileFields[k] = { field, species: species || 0, log: null };
+  } else if (t instanceof HTMLInputElement && t.dataset.log !== undefined) {
+    const f = profileFields[Number(t.dataset.log)];
+    if (f) f.log = t.checked;
+  } else return;
+  profileRanges = [];
   syncProfileMenu();
   drawProfilePop();
   requestProfile();
 });
-profileSel2.addEventListener('change', () => {
-  if (!profiles.length) return;
-  if (profileSel2.value === '') profileField2 = null;
-  else {
-    const [f, k] = profileSel2.value.split(':').map(Number);
-    profileField2 = { field: f, species: k || 0, log: null };
-  }
-  profileRange = null;
-  profileRange2 = null;
+profileRows.addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest<HTMLButtonElement>('button[data-rm]');
+  if (!b || profileFields.length < 2) return;
+  profileFields.splice(Number(b.dataset.rm), 1);
+  profileRanges = [];
   syncProfileMenu();
   drawProfilePop();
   requestProfile();
 });
-$<HTMLInputElement>('profile-log2').addEventListener('change', (e) => {
-  if (!profileField2) return;
-  profileField2.log = (e.target as HTMLInputElement).checked;
-  profileRange2 = null;
+$('profile-add').addEventListener('click', () => {
+  const f = nextProfileField();
+  if (!f || !profiles.length) return;
+  profileFields.push(f);
+  profileRanges = [];
+  syncProfileMenu();
   drawProfilePop();
-});
-$<HTMLInputElement>('profile-log').addEventListener('change', (e) => {
-  if (!profiles.length) return;
-  profileField.log = (e.target as HTMLInputElement).checked;
-  profileRange = null;
-  drawProfilePop();
+  requestProfile();
 });
 $('profile-swap').addEventListener('click', () => swapProfile(0));
 $('profile-lines').addEventListener('click', (e) => {
@@ -4062,26 +4084,21 @@ $('profile-lines').addEventListener('click', (e) => {
 });
 $('profile-close').addEventListener('click', () => closeProfile());
 $('profile-csv').addEventListener('click', () => {
-  const list = profiles.map(profileSamples).filter((d): d is ProfileSamples => !!d);
-  if (!list.length) return;
+  const lines = profiles.filter((p) => profileSamples(p));
+  if (!lines.length) return;
   const u = units();
-  const projected = list[0].projection !== null;
-  const m = profileMeasure(list[0].field, projected);
+  const projected = profileSamples(lines[0])!.projection !== null;
   const unit = (l: string) => (l ? ` (${l})` : '');
-  // The second field's column: each line's samples of it, where they were read.
-  const f2 = profileField2;
-  const m2 = f2 ? profileMeasure(f2.field, projected) : null;
-  const seconds = profiles.filter((p) => profileSamples(p)).map(profileSamples2);
+  const ms = profileFields.map((f) => profileMeasure(f.field, projected));
   const csv = profileCsv(
-    list.map((d, i) => {
-      const d2 = seconds[i];
-      return { s: Array.from(d.s, (v) => v * u.scale('length')), values: Array.from(d.values, (v) => v * u.scale(m)), ...(d2 && m2 ? { values2: Array.from(d2.values, (v) => v * u.scale(m2)) } : {}), levels: d.levels };
+    lines.map((p) => {
+      const d = profileSamples(p)!;
+      return { s: Array.from(d.s, (v) => v * u.scale('length')), values: profileFields.map((_, k) => {
+        const q = samplesOf(p, k);
+        return q ? Array.from(q.values, (v) => v * u.scale(ms[k])) : null;
+      }), levels: d.levels };
     }),
-    {
-      distance: `distance${unit(u.label('length'))}`,
-      value: `${profileFieldName(list[0].field, list[0].species, projected)}${unit(u.label(m))}`,
-      ...(f2 && m2 ? { value2: `${profileFieldName(f2.field, f2.species, projected)}${unit(u.label(m2))}` } : {}),
-    },
+    { distance: `distance${unit(u.label('length'))}`, values: profileFields.map((f, k) => `${profileFieldName(f.field, f.species, projected)}${unit(u.label(ms[k]))}`) },
   );
   const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
   const a = document.createElement('a');
@@ -4095,7 +4112,7 @@ profileCanvas.addEventListener('pointermove', (e) => {
   const list = profiles.map(profileSamples).filter((d): d is ProfileSamples => !!d);
   if (!list.length) return;
   const r = profileCanvas.getBoundingClientRect();
-  const at = distanceAt(e.clientX - r.left, r.width, plotLength(list), !!profileField2);
+  const at = distanceAt(e.clientX - r.left, r.width, plotLength(list), profileFields.length > 1);
   profileHoverFromLine = false;
   if (at !== profileHover?.s) {
     profileHover = at === null ? null : { s: at, line: -1 };
@@ -4136,21 +4153,18 @@ const escapeHtml = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;')
 /** Draw the panel's plot and words from the samples last read. */
 function drawProfilePop() {
   if (profilePop.hidden || !profiles.length || !cfg) return;
-  const f = profileField;
+  const f = profileFields[0];
   const lines = profiles.map((p) => ({ p, d: profileSamples(p) }));
   const first = lines.find((l) => l.d)?.d;
   const u = units();
   const projected = first ? first.projection !== null : projecting();
-  const m = profileMeasure(f.field, projected);
-  const unit = u.label(m);
-  const title = profilePop.querySelector('.title')!;
-  const f2 = profileField2;
-  const m2 = f2 ? profileMeasure(f2.field, projected) : null;
-  const unit2 = m2 ? u.label(m2) : '';
+  const ms = profileFields.map((q) => profileMeasure(q.field, projected));
+  const m = ms[0];
   const named = (fld: { field: number; species: number }, un: string) => `${profileFieldName(fld.field, fld.species, projected)}${un ? `, ${un}` : ''}`;
-  const text = `${named(f, unit)}${f2 ? ` and ${named(f2, unit2)} (dashed)` : ''}${projected ? ` (projected along ${'xyz'[first?.projection ?? view.sliceAxis]})` : ''}`;
+  const extra = profileFields.length - 1;
+  const title = profilePop.querySelector('.title')!;
+  const text = `${named(f, u.label(m))}${extra === 1 ? ` and ${named(profileFields[1], u.label(ms[1]))}` : extra > 1 ? ` and ${extra} more` : ''}${projected ? ` (projected along ${'xyz'[first?.projection ?? view.sliceAxis]})` : ''}`;
   if (title.textContent !== text) title.textContent = text;
-  const log = profileLog();
   const w = profileCanvas.clientWidth;
   const h = profileCanvas.clientHeight;
   if (!w || !h) return;
@@ -4165,50 +4179,35 @@ function drawProfilePop() {
   const color = (v: string, fb: string) => cs.getPropertyValue(v).trim() || fb;
   const colors = { dim: color('--dim', '#8792a8'), frame: color('--line', '#262c3a'), mark: color('--text', '#d6dbe6') };
   const ls = u.scale('length');
-  const vs = u.scale(m);
-  const series = lines
-    .filter((l) => l.d)
-    .map(({ p, d }) => ({ s: Array.from(d!.s, (v) => v * ls), values: Array.from(d!.values, (v) => v * vs), solid: d!.solid, levels: cfg.amrLevels > 0 ? d!.levels : undefined, color: PROFILE_COLORS[p.color] }));
-  // The value axis eases toward the values' range while the run goes, and widens at once.
-  const key = `${f.field}:${f.species}:${log}:${projected}:${unitSys}:${profiles.length}`;
-  const target = series.length ? seriesRange(series, log) : null;
-  if (target) {
-    const r = profileRange;
-    const now = performance.now();
-    if (!r || r.key !== key) profileRange = { key, range: target, at: now };
-    else {
-      // It widens at once; it narrows by time (a quarter second to close most of the way),
-      // however often the samples come.
-      const k = 1 - Math.exp(-(now - r.at) / 250);
-      const ease = (cur: number, to: number, grow: boolean) => (grow ? to : cur + k * (to - cur));
-      r.range = [ease(r.range[0], target[0], target[0] < r.range[0]), ease(r.range[1], target[1], target[1] > r.range[1])];
-      r.at = now;
+  // Each field: every line's samples in the units shown, and its axis, eased toward the values'
+  // range while the run goes (widened at once, narrowed by time).
+  const now = performance.now();
+  const plotted = profileFields.map((fld, k) => {
+    const log = profileLog(fld);
+    const vs = u.scale(ms[k]);
+    const series = profiles.flatMap((p) => {
+      const d = samplesOf(p, k);
+      return d ? [{ s: Array.from(d.s, (v) => v * ls), values: Array.from(d.values, (v) => v * vs), solid: d.solid, levels: k === 0 && cfg.amrLevels > 0 ? d.levels : undefined, color: PROFILE_COLORS[p.color] }] : [];
+    });
+    const target = series.length ? seriesRange(series, log) : null;
+    const key = `${fld.field}:${fld.species}:${log}:${projected}:${unitSys}:${profiles.length}`;
+    if (target) {
+      const r = profileRanges[k];
+      if (!r || r.key !== key) profileRanges[k] = { key, range: target, at: now };
+      else {
+        // It widens at once; it narrows by time (a quarter second to close most of the way),
+        // however often the samples come.
+        const e = 1 - Math.exp(-(now - r.at) / 250);
+        const ease = (cur: number, to: number, grow: boolean) => (grow ? to : cur + e * (to - cur));
+        r.range = [ease(r.range[0], target[0], target[0] < r.range[0]), ease(r.range[1], target[1], target[1] > r.range[1])];
+        r.at = now;
+      }
     }
-  }
-  // The second field: each line's, against the axis on the right, eased as the first's.
-  const log2 = f2 ? profileLog(f2) : false;
-  const vs2 = m2 ? u.scale(m2) : 1;
-  const series2 = f2
-    ? profiles.flatMap((p) => {
-        const d = profileSamples2(p);
-        return d ? [{ s: Array.from(d.s, (v) => v * ls), values: Array.from(d.values, (v) => v * vs2), solid: d.solid, color: PROFILE_COLORS[p.color] }] : [];
-      })
-    : [];
-  const target2 = series2.length ? seriesRange(series2, log2) : null;
-  if (target2) {
-    const key2 = `${f2!.field}:${f2!.species}:${log2}:${projected}:${unitSys}:${profiles.length}`;
-    const r = profileRange2;
-    const now = performance.now();
-    if (!r || r.key !== key2) profileRange2 = { key: key2, range: target2, at: now };
-    else {
-      const k = 1 - Math.exp(-(now - r.at) / 250);
-      const ease = (cur: number, to: number, grow: boolean) => (grow ? to : cur + k * (to - cur));
-      r.range = [ease(r.range[0], target2[0], target2[0] < r.range[0]), ease(r.range[1], target2[1], target2[1] > r.range[1])];
-      r.at = now;
-    }
-  }
-  const second = f2 ? { series: series2, log: log2, range: target2 ? profileRange2!.range : null } : null;
-  drawProfilePlot(ctx, w, h, { series, log, range: target ? profileRange!.range : null, mark: profileHover ? profileHover.s * ls : null, colors, second });
+    return { series, log, range: target ? profileRanges[k]!.range : null };
+  });
+  const [main, ...more] = plotted;
+  const series = main.series;
+  drawProfilePlot(ctx, w, h, { ...main, mark: profileHover ? profileHover.s * ls : null, colors, more });
   // Under the plot: the values at the distance hovered, or the line's ends and length.
   const foot = profilePop.querySelector('.foot')!;
   const lu = u.label('length');
@@ -4222,10 +4221,13 @@ function drawProfilePop() {
       if (!d) return [];
       const k = sampleNear(d.s, hs);
       if (k < 0) return [];
-      let v = d.solid[k] ? 'solid' : u.fmt(d.values[k], m);
-      // The second field's value at the same sample, after a slash.
-      const d2 = profileSamples2(p);
-      if (d2 && m2 && k < d2.values.length) v += ` / ${d2.solid[k] ? 'solid' : u.fmt(d2.values[k], m2)}`;
+      // Each field's value at the same sample, after slashes.
+      const v = profileFields
+        .map((_, j) => {
+          const q = samplesOf(p, j);
+          return !q || k >= q.values.length ? '–' : q.solid[k] ? 'solid' : u.fmt(q.values[k], ms[j]);
+        })
+        .join(' / ');
       const lev = cfg.amrLevels > 0 ? `, level ${d.levels[k]}` : '';
       return [several ? `<span style="color:${PROFILE_COLORS[p.color]}">${i + 1}</span> ${escapeHtml(v)}${lev}` : `${escapeHtml(v)}${lev}`];
     });
@@ -4236,7 +4238,11 @@ function drawProfilePop() {
   } else {
     html = escapeHtml(`${profiles.length} lines; hover the plot to read them`);
   }
-  if (foot.innerHTML !== html) foot.innerHTML = html;
+  if (foot.innerHTML !== html) {
+    foot.innerHTML = html;
+    // (Several fields' values can run past the panel's edge: all of them in the tooltip.)
+    foot.setAttribute('title', foot.textContent ?? '');
+  }
 }
 
 
@@ -4271,7 +4277,7 @@ async function apiProfile(o: { from?: number[]; to?: number[]; field?: string | 
     [a, b] = c;
   }
   if (o.show !== undefined && o.show !== true && o.show !== false && o.show !== 'add') throw new Error('profile: "show" is true (the line alone), "add" (with those on show) or false');
-  const fallback = profiles.length && (onShow || o.show === 'add') ? { field: profileField.field, species: profileField.species } : { field: view.field, species: view.species };
+  const fallback = profiles.length && (onShow || o.show === 'add') ? { field: profileFields[0].field, species: profileFields[0].species } : { field: view.field, species: view.species };
   const f = resolveField(o.field, cfg.problem.species ?? [], fallback);
   if (!fieldOffered(f.field)) throw new Error(`profile: ${FIELDS[f.field]} is not available in this run`);
   if (cfg.viewBaked && (f.field !== view.field || (f.field === MASS_FRACTION_FIELD && f.species !== view.species))) {
@@ -4286,9 +4292,15 @@ async function apiProfile(o: { from?: number[]; to?: number[]; field?: string | 
   if (o.show === 'add' && profiles.length >= MAX_PROFILES) throw new Error(`profile: at most ${MAX_PROFILES} lines on show at once`);
   const r = await profileOf(s, a, b, { ...f, projection }, o.n);
   if (o.show) {
-    // A new field for the lines on show resamples those already there.
-    if (o.show === true) profiles = [];
-    Object.assign(profileField, { field: f.field, species: f.species, log: o.show === true ? null : profileField.log });
+    // On show alone: its field alone. Added: its field first, the panel's others kept, and the
+    // lines already there sampled again.
+    if (o.show === true) {
+      profiles = [];
+      profileFields = [{ ...f, log: null }];
+    } else {
+      const rest = profileFields.slice(1).filter((q) => q.field !== f.field || q.species !== f.species);
+      profileFields = [{ ...f, log: profileFields[0].field === f.field && profileFields[0].species === f.species ? profileFields[0].log : null }, ...rest];
+    }
     addProfile(a, b, r);
     openProfilePop(true);
   }

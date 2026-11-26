@@ -44,13 +44,8 @@ const at = (c: object, path: string): unknown => path.split('.').reduce<unknown>
  */
 export interface LinkProfiles {
   lines: [Vec3, Vec3][];
-  field?: number;
-  species?: number;
-  log?: boolean | null;
-  /** a second field along the same lines, its species and its log axis */
-  field2?: number;
-  species2?: number;
-  log2?: boolean | null;
+  /** the fields plotted along them, in the panel's order (left out: the one the view shows) */
+  fields?: { field: number; species?: number; log?: boolean | null }[];
 }
 
 export interface LinkState {
@@ -141,12 +136,9 @@ export function linkKeys(): LinkKey[] {
     { key: 'cmap', group: 'view', about: 'Colormap' },
     { key: 'tf', group: 'view', about: 'Volume view: the opacity curve, as x:a points separated by commas' },
     { key: 'prof', group: 'view', about: `Profile lines on show, at most ${MAX_PROFILES}: each x0,y0,x1,y1 (2D) or x0,y0,z0,x1,y1,z1 (3D) in fractions of the box, ; between lines` },
-    { key: 'proff', group: 'view', about: 'The field plotted along the profile lines, an index into the fields (default: the one shown)' },
-    { key: 'profsp', group: 'view', about: 'With proff a mass fraction: its species, by index' },
-    { key: 'proflog', group: 'view', about: 'The profile plot\u2019s value axis logarithmic (1) or linear (0); left out: as the field\u2019s default' },
-    { key: 'proff2', group: 'view', about: 'A second field plotted along the same profile lines (dashed, on an axis of its own), an index into the fields' },
-    { key: 'profsp2', group: 'view', about: 'With proff2 a mass fraction: its species, by index' },
-    { key: 'proflog2', group: 'view', about: 'The second field\u2019s axis logarithmic (1) or linear (0); left out: as the field\u2019s default' },
+    { key: 'proff', group: 'view', about: 'The fields plotted along the profile lines, indices into the fields separated by commas, the first against the left axis (default: the one shown)' },
+    { key: 'profsp', group: 'view', about: 'For each of proff, the species of a mass fraction, by index (commas; empty or 0 for other fields)' },
+    { key: 'proflog', group: 'view', about: 'For each of proff, its axis logarithmic (1) or linear (0), or empty for the field\u2019s default (commas)' },
   ];
 }
 
@@ -199,13 +191,13 @@ export function encodeLink(s: LinkState): URLSearchParams {
   const pr = s.profiles;
   if (pr?.lines.length) {
     q.set('prof', encodeProfileLines(pr.lines.map(([a, b]) => ({ a, b })), cfg.ndim));
-    if (pr.field !== undefined) q.set('proff', String(pr.field));
-    if (pr.field === MASS_FRACTION_FIELD && pr.species) q.set('profsp', String(pr.species));
-    if (pr.log !== undefined && pr.log !== null) q.set('proflog', flag(pr.log));
-    if (pr.field2 !== undefined) {
-      q.set('proff2', String(pr.field2));
-      if (pr.field2 === MASS_FRACTION_FIELD && pr.species2) q.set('profsp2', String(pr.species2));
-      if (pr.log2 !== undefined && pr.log2 !== null) q.set('proflog2', flag(pr.log2));
+    const fs = pr.fields ?? [];
+    if (fs.length) {
+      q.set('proff', fs.map((f) => f.field).join(','));
+      const sp = fs.map((f) => (f.field === MASS_FRACTION_FIELD && f.species ? String(f.species) : ''));
+      if (sp.some(Boolean)) q.set('profsp', sp.join(','));
+      const logs = fs.map((f) => (f.log === undefined || f.log === null ? '' : flag(f.log)));
+      if (logs.some(Boolean)) q.set('proflog', logs.join(','));
     }
   }
   return q;
@@ -393,32 +385,38 @@ function decodeRenamed(q: URLSearchParams, report?: LinkReport): LinkOverrides {
     if (ok) out.opacity = pts.map(([x, a]) => ({ x, a })).sort((a, b) => a.x - b.x);
     else rejected('tf', tf);
   }
-  // The profile lines, and the field plotted along them: read whether or not there are lines
-  // to plot it along, so that what comes without them is reported, not passed over.
+  // The profile lines, and the fields plotted along them: read whether or not there are lines
+  // to plot them along, so that what comes without them is reported, not passed over.
   const prof = q.get('prof');
   const lines = prof ? decodeProfileLines(prof, out.ndim) : null;
   if (prof && !lines) rejected('prof', prof, `not ${out.ndim === 2 ? 'x0,y0,x1,y1' : 'x0,y0,z0,x1,y1,z1'} lines in fractions of the box, at most ${MAX_PROFILES}`);
-  const pf = num('proff', 0, FIELDS.length - 1);
-  const psp = num('profsp', 0, most.species);
-  const plog = bool('proflog');
+  /** A list of the profile keys, each entry a whole number from 0 to `hi` or empty; null if malformed. */
+  const list = (key: string, hi: number): (number | null)[] | undefined => {
+    const raw = q.get(key);
+    if (raw === null || raw === '') return undefined;
+    const v = raw.split(',').map((x) => (x.trim() === '' ? null : Number(x)));
+    if (v.length > FIELDS.length + most.species! + 1 || !v.every((x) => x === null || (Number.isInteger(x) && x >= 0 && x <= hi))) return void rejected(key, raw);
+    return v;
+  };
+  const pf = list('proff', FIELDS.length - 1);
+  const psp = list('profsp', most.species!);
+  const plog = list('proflog', 1);
+  // (proff2, profsp2 and proflog2: a second field, as links had it briefly. Read on after proff's.)
   const pf2 = num('proff2', 0, FIELDS.length - 1);
   const psp2 = num('profsp2', 0, most.species);
   const plog2 = bool('proflog2');
   if (lines) {
     out.profiles = { lines };
-    if (pf !== undefined) out.profiles.field = Math.round(pf);
-    if (psp !== undefined && out.profiles.field === MASS_FRACTION_FIELD) out.profiles.species = Math.round(psp);
-    if (plog !== undefined) out.profiles.log = plog;
-    if (pf2 !== undefined) {
-      out.profiles.field2 = Math.round(pf2);
-      if (psp2 !== undefined && out.profiles.field2 === MASS_FRACTION_FIELD) out.profiles.species2 = Math.round(psp2);
-      if (plog2 !== undefined) out.profiles.log2 = plog2;
-    } else {
-      for (const k of ['profsp2', 'proflog2']) {
-        const raw = q.get(k);
-        if (raw !== null) rejected(k, raw, 'goes with proff2');
-      }
+    const fields = (pf ?? []).flatMap((f, k) => (f === null ? [] : [{
+      field: f,
+      ...(f === MASS_FRACTION_FIELD && psp?.[k] ? { species: psp[k]! } : {}),
+      ...(plog?.[k] !== undefined && plog[k] !== null ? { log: plog[k] === 1 } : {}),
+    }]));
+    if (pf2 !== undefined && fields.length) {
+      const f = Math.round(pf2);
+      fields.push({ field: f, ...(f === MASS_FRACTION_FIELD && psp2 ? { species: Math.round(psp2) } : {}), ...(plog2 !== undefined ? { log: plog2 } : {}) });
     }
+    if (fields.length) out.profiles.fields = fields;
   } else {
     for (const k of ['proff', 'profsp', 'proflog', 'proff2', 'profsp2', 'proflog2']) {
       const raw = q.get(k);

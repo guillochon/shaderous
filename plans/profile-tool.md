@@ -14,13 +14,18 @@ not started and not asked for.
   frame's profile pass samples every line in one dispatch, their points one after another.
   Hovering the plot reads each line at that distance; hovering a line marks that distance on
   every line. The CSV has a `line` column when there are several.
-- A second field (asked for after the first stage 4 commit): the panel's second menu plots
-  another field along every line, dashed, against its own axis on the right, with its own log
-  switch and eased range. The frame samples it in a second pass over the same points; the
-  renderer gives each pass encoded into one frame a uniform buffer of its own (`slot`), since
-  both writes reach the queue before either pass runs, and keeps six readbacks, not three.
-  Hover reads both (`first / second`), the CSV gets a column, the link carries `proff2`,
-  `profsp2`, `proflog2`. The API still reads one field a call.
+- Several fields (asked for after the first stage 4 commit): the panel lists the fields
+  plotted along every line (`profileFields`), a row each on one grid (its pattern, its menu,
+  its log switch, a remove button), so the menus are all as wide; **+ Field** adds the first
+  field the run offers that no row plots, and a row's menu leaves out the others' fields. The
+  first is solid against the left axis, the second against an axis on the right, the rest each
+  on its own eased range, unlabelled (`profileDash` gives the patterns). Each field is a pass
+  of its own over the same points; the renderer gives each pass encoded into one frame a
+  uniform buffer of its own (`slot`), since every write reaches the queue before any pass runs,
+  and keeps three readbacks a slot. Hover reads every field (`a / b / c`), the CSV has a column
+  a field, the link's `proff`, `profsp`, `proflog` are lists (one entry a field; `proff2`,
+  `profsp2`, `proflog2`, which links carried for an hour, are still read). The API reads one
+  field a call.
 - The link: `prof` (each line's ends, four or six numbers to 4 decimals, `;` between lines),
   `proff` (the field's index), `profsp` (a mass fraction's species) and `proflog`. Decoded and
   clipped in `link.ts`; a malformed `prof` is reported as ignored. The page sets the lines while
