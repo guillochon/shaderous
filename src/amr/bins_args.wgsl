@@ -84,8 +84,10 @@ fn main() {
   put(15u, 48u, min(na, FLAT_ROWS), (na + FLAT_ROWS - 1u) / FLAT_ROWS);
   let box17 = (select(17u * 17u * 17u, 17u * 17u, flat) + 63u) / 64u;
   put(16u, (select(w2 * w2 * w2, w2 * w2, flat) + 63u) / 64u, min(nl, FLAT_ROWS), (nl + FLAT_ROWS - 1u) / FLAT_ROWS);
-  put(17u, box17, nu, 1u);
-  put(18u, box17, nd, 1u);
+  // (rows in slabs of FLAT_ROWS, as above: a 2D mesh with a field can have more leaves than an
+  // axis may have workgroups)
+  put(17u, box17, min(nu, FLAT_ROWS), (nu + FLAT_ROWS - 1u) / FLAT_ROWS);
+  put(18u, box17, min(nd, FLAT_ROWS), (nd + FLAT_ROWS - 1u) / FLAT_ROWS);
   ARGS[60] += nu;
   ARGS[61] += na;
 }

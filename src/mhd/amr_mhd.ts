@@ -16,6 +16,7 @@ import { bindGroup, bindGroupUsed, computePipeline, readTexture, type Bindable }
 import { Reducer } from '../gpu/reduce';
 import type { SimConfig } from '../sim';
 import { BS, type Block } from '../amr/tree';
+import { rows } from '../amr/dispatch';
 import { MAG_OPS, magneticFrom, mhdRiemann, type MagDiagnostics } from './mhd';
 
 /** Bytes the flux scratch may take, which sets how many leaves a chunk holds. */
@@ -515,7 +516,7 @@ export class AmrMhd {
   encodeFieldBrush(pass: GPUComputePassEncoder, parity: number, interior: (pass: GPUComputePassEncoder) => void) {
     pass.setPipeline(this.pBrush[0]);
     pass.setBindGroup(0, this.gBrush[parity][0]);
-    pass.dispatchWorkgroups(this.groups(BS + 1), this.nLeaf);
+    pass.dispatchWorkgroups(...rows(this.groups(BS + 1), this.nLeaf));
     pass.setPipeline(this.pBrush[1]);
     pass.setBindGroup(0, this.gBrush[parity][1]);
     interior(pass);
@@ -525,7 +526,7 @@ export class AmrMhd {
   encodeCommitFaces(pass: GPUComputePassEncoder, parity: number) {
     pass.setPipeline(this.pCommit!);
     pass.setBindGroup(0, this.gCommitAll[parity]);
-    pass.dispatchWorkgroups(this.groups(BS + 1), this.nLeaf);
+    pass.dispatchWorkgroups(...rows(this.groups(BS + 1), this.nLeaf));
   }
 
   /**
@@ -707,7 +708,7 @@ export class AmrMhd {
     for (const [pipe, g] of [[this.pRegrid, this.gRegrid[p]], [this.pEnergy, this.gEnergy[p]]] as const) {
       pass.setPipeline(pipe);
       pass.setBindGroup(0, g);
-      pass.dispatchWorkgroups(this.groups(BS + 1), this.nLeaf);
+      pass.dispatchWorkgroups(...rows(this.groups(BS + 1), this.nLeaf));
     }
   }
 
