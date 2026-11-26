@@ -1607,7 +1607,14 @@ export function packParams(
   // with the potential's differences, while the kick takes the proper field grad(phi) / a, so
   // there the two disagreed by a factor a, and in cold gas E - KE was that disagreement. The kick
   // form adds the kinetic energy the kick adds, exactly.)
-  u.set([c.n, x.selfGravity || x.masses > 0 ? 1 : 0, c.gravity === 'isolated' || !x.selfGravity || spherical(c) ? 1 : 0, (c.gravEnergyFlux && !cosmologyOf(c) ? 1 : 0) | (x.solids ? 2 : 0) | (x.sources ? 4 : 0) | (c.wellBalanced && eosHasEnergy(c.eos) && !cosmologyOf(c) ? 8 : 0) | (c.problem.refineMasses && c.amrLevels > 0 ? 16 : 0) | (c.problem.mhd ? 32 : 0) | (x.gravCorrection ? 64 : 0)], 36);
+  // Bit 3, the well-balanced reconstruction (hydro/q.wgsl), only where there is a potential to
+  // balance against: with none every potential step is zero, the reconstruction is the plain one
+  // bit for bit, and computing the steps was wasted work (a 3D Sedov step took 1.66 ms with them
+  // and 1.32 without, a 2D Kelvin-Helmholtz step 0.28 and 0.23, on an RTX 3080). Point masses
+  // placed during a run turn it on with the next write of this block.
+  const potential = c.gravity !== 'off' || x.masses > 0 || rotationOf(c)[3] !== 0 || !!c.problem.shear || uniformField(c).some((g) => g !== 0);
+  const wb = c.wellBalanced && eosHasEnergy(c.eos) && !cosmologyOf(c) && potential;
+  u.set([c.n, x.selfGravity || x.masses > 0 ? 1 : 0, c.gravity === 'isolated' || !x.selfGravity || spherical(c) ? 1 : 0, (c.gravEnergyFlux && !cosmologyOf(c) ? 1 : 0) | (x.solids ? 2 : 0) | (x.sources ? 4 : 0) | (wb ? 8 : 0) | (c.problem.refineMasses && c.amrLevels > 0 ? 16 : 0) | (c.problem.mhd ? 32 : 0) | (x.gravCorrection ? 64 : 0)], 36);
   f.set(
     [
       x.dx,

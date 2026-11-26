@@ -8,9 +8,12 @@
 //                          takes a cell beyond a boundary to have the potential of the cell
 //                          its state is taken from, `face` is the true difference across a
 //                          reflecting face (and equals `seen` everywhere else)
-//   dphi_face(a, axis, k)  the plain difference, with no boundary involved, for flux_between
-//   wall_step(a, axis, s)  for flux_between, the true step across a face whose plain step is s,
-//                          and the sign each side takes it with (gravity/gfield.wgsl)
+//   dphi_face(a, axis, k)  for flux_between, as (plain, true): the plain difference, with no
+//                          boundary involved, and the true difference across a reflecting face
+//   wall_step(a, axis, s, t)  for flux_between, the true step across a face whose plain step
+//                          is s, and the sign each side takes it with: t is dphi_face's second
+//                          part for k = 0 (gravity/gfield.wgsl), which a grid may take from its
+//                          own tables instead (amr/update.wgsl)
 // and, for viscosity (hydro/diffusion.wgsl), load_vel(c) and face_rim(a, axis, t), and for a
 // composition that varies (species/mixture.ts), load_comp(c): the moments of a cell. Each face
 // state takes the composition of the cell it was reconstructed in.
@@ -193,15 +196,24 @@ fn flux_between(a: vec3<i32>, e: vec3<i32>, axis: i32) -> Flux {
   let nr = wr;
   var kl = load_comp(a);
   var kr = load_comp(a + e);
-  // Potential steps between the four cells, lowest pair first.
+  // Potential steps between the four cells, lowest pair first, and the true step across the face
+  // for wall_step, from the same call as the middle step: each step maps two cells through the
+  // boundaries and sums the point masses, and the compiler inlines every call, so a fourth call
+  // for the wall's step cost the uniform update about 12 percent of its compile time (1.30 s
+  // against 1.14 for a 2D Kelvin-Helmholtz run in Chrome on a cold cache). One call in a kept
+  // loop compiled faster still (0.91 s), but serialized the loads: steps of a tidal disruption
+  // took 2.6 percent longer.
   var d = vec3<f32>(0.0);
+  var t = 0.0;
   if (well_balanced()) {
-    d = vec3<f32>(dphi_face(a, axis, -1), dphi_face(a, axis, 0), dphi_face(a, axis, 1));
+    let s0 = dphi_face(a, axis, 0);
+    d = vec3<f32>(dphi_face(a, axis, -1).x, s0.x, dphi_face(a, axis, 1).x);
+    t = s0.y;
   }
   let across = d.y;
   // The true step across, and its sign for a side that is the image of the other in a wall of
   // the grid: what axis_fluxes uses there. Elsewhere (across, 1, 1).
-  let ws = wall_step(a, axis, across);
+  let ws = wall_step(a, axis, across, t);
   var sides = vec2<f32>(1.0);
   var wall = false;
   var vw = 0.0;

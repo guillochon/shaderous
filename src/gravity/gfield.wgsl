@@ -72,16 +72,16 @@ fn dphi_step(c: vec3<i32>, axis: i32, k: i32) -> vec2<f32> {
   }
   return vec2<f32>(seen, face);
 }
-fn dphi_face(a: vec3<i32>, axis: i32, k: i32) -> f32 {
-  return dphi_step(a, axis, k).x;
+fn dphi_face(a: vec3<i32>, axis: i32, k: i32) -> vec2<f32> {
+  return dphi_step(a, axis, k);
 }
 // For flux_between (hydro/flux.wgsl), the face between a and a + e, whose potential step as
-// the deviations see it is `across`: the true step, and for each side -1 where that side is
-// the image of the other in a reflecting wall of the grid, so that it reaches the wall from its
-// own side (as axis_fluxes has it); (across, 1, 1) on every other face, bit for bit.
-fn wall_step(a: vec3<i32>, axis: i32, across: f32) -> vec3<f32> {
+// the deviations see it is `across` and whose true step is `t` (dphi_face(a, axis, 0).y): the
+// true step, and for each side -1 where that side is the image of the other in a reflecting
+// wall of the grid, so that it reaches the wall from its own side (as axis_fluxes has it);
+// (across, 1, 1) on every other face, bit for bit.
+fn wall_step(a: vec3<i32>, axis: i32, across: f32, t: f32) -> vec3<f32> {
   if (!well_balanced()) { return vec3<f32>(across, 1.0, 1.0); }
-  let t = dphi_step(a, axis, 0).y;
   let n = grid_n()[axis];
   let image = select(1.0, -1.0, across != t);
   return vec3<f32>(t, select(1.0, image, a[axis] < 0), select(1.0, image, a[axis] + 1 >= n));
