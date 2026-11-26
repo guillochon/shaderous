@@ -188,7 +188,16 @@ fn share(nb: i32) -> f32 {
 // call of it (with the Riemann solver), and unroll small loops: as calls for each face of each
 // axis, in the deposit and the full pass, it was copied dozens of times, and the pass took
 // 1.5 s to compile, two thirds of it these copies (measured on Chrome, D3D12, cold cache).
+//
+// Compiled in, this loop (with its own copy of flux_between) slowed every cell of the pass by
+// about half, though few are on such a face (2026-11-26, a tidal disruption on 176 leaves: 27%
+// of them next to a refined block, 1.7% of the cells on such a face). Without per-block
+// timesteps, amr_sim.ts dispatches the leaves with no refined neighbor through a pipeline
+// compiled with MATCH off, for which this changes nothing.
+override MATCH: bool = true;
+
 fn match_faces(own: array<Faces, 3>, slot: i32, l: vec3<i32>) -> array<Faces, 3> {
+  if (!MATCH) { return own; }
   var out = own;
   // Lower and upper face of x, then of y, then of z: entry 6 + k of the block table.
   let sides = select(6, 4, is2d());

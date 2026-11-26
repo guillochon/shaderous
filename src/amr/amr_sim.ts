@@ -375,6 +375,18 @@ export class AmrSim implements Simulation {
   /** The hydro prediction and update: not built with a magnetic field, whose step is its own (mhd/amr_mhd.ts). */
   private pPredict!: GPUComputePipeline;
   private pUpdate!: GPUComputePipeline;
+  /**
+   * Without per-block timesteps: the update compiled without matching fluxes at refinement
+   * boundaries (amr/update.wgsl, MATCH), for the leaves with no refined neighbor, and its bind
+   * groups and the matching pipeline's over the two halves of the leaf list (uploadTree).
+   */
+  private pUpdatePlain: GPUComputePipeline | null = null;
+  private gUpdatePlain: GPUBindGroup[] = [];
+  private gUpdateMatch: GPUBindGroup[] = [];
+  private listPlain: GPUBuffer;
+  private listMatch: GPUBuffer;
+  private nPlain = 0;
+  private nMatch = 0;
   private pClock!: GPUComputePipeline;
   private pFlag!: GPUComputePipeline;
   private pRegrid!: GPUComputePipeline;
@@ -569,6 +581,8 @@ export class AmrSim implements Simulation {
     this.bt = d.createBuffer({ size: this.cap * BT_STRIDE * 4, usage: storage });
     this.listAll = d.createBuffer({ size: (this.cap + 1) * 4, usage: storage });
     this.listLeaf = d.createBuffer({ size: (this.cap + 1) * 4, usage: storage });
+    this.listPlain = d.createBuffer({ size: (this.cap + 1) * 4, usage: storage });
+    this.listMatch = d.createBuffer({ size: (this.cap + 1) * 4, usage: storage });
     for (let l = 0; l <= this.levels; l++) this.listLevel.push(d.createBuffer({ size: (this.cap + 1) * 4, usage: storage }));
     this.gfield = st('gravity field');
     this.bh = d.createBuffer({ size: MASS_FLOATS * 4, usage: storage });
@@ -957,6 +971,11 @@ export class AmrSim implements Simulation {
       // With a field the correction keeps its energy out of what it rebuilds (MHD).
       computePipeline(d, assemble('amr/correct.wgsl', slots), 'amr gravity correct', { MHD: this.cfg.problem.mhd ? 1 : 0 }),
       computePipeline(d, assemble('amr/brush.wgsl', slots), 'amr brush'),
+      // On an adaptive mesh without per-block timesteps, the update again for the leaves with no
+      // refined neighbor: without the matching at refinement boundaries (see pUpdatePlain).
+      hydro && this.levels > 0 && this.timeBins === 0
+        ? computePipeline(d, assemble('amr/update.wgsl', slots), 'amr update (no refined faces)', { ...this.tileConstants(), MATCH: 0 })
+        : null,
     ] as const;
   }
 
@@ -980,12 +999,13 @@ export class AmrSim implements Simulation {
       'amr diagnostics',
     );
     diag.catch(() => {}); // a failure is reported where it is awaited, below
-    const [assembleP, predictP, updateP, regridP, correctP, brushP] = this.hydroPipelines();
+    const [assembleP, predictP, updateP, regridP, correctP, brushP, plainP] = this.hydroPipelines();
     // Not deferred, the update pass changes over together with the others.
     let pUpdate: GPUComputePipeline | null | undefined;
+    let pPlain: GPUComputePipeline | null | undefined;
     let pPredict: GPUComputePipeline | null;
-    [this.pAssemble, pPredict, this.pRegrid, this.pCorrect, this.pBrush, pUpdate] = await Promise.all([
-      assembleP, predictP, regridP, correctP, brushP, deferUpdate ? undefined : updateP,
+    [this.pAssemble, pPredict, this.pRegrid, this.pCorrect, this.pBrush, pUpdate, pPlain] = await Promise.all([
+      assembleP, predictP, regridP, correctP, brushP, deferUpdate ? undefined : updateP, deferUpdate ? undefined : plainP,
     ]);
     if (pPredict) this.pPredict = pPredict;
     if (radiationOn(this.cfg)) {
@@ -1111,14 +1131,17 @@ export class AmrSim implements Simulation {
         }),
       );
     }
-    const bindUpdate = (pipe: GPUComputePipeline) => {
+    const bindUpdate = (pipe: GPUComputePipeline, plain: GPUComputePipeline | null) => {
       if (epoch !== this.hydroEpoch) return; // rebuilt since
       this.pUpdate = pipe;
       this.gUpdate = [0, 1].map((p) => this.updateGroup(pipe, p));
       this.gUpdateB = K > 0 ? [0, 1].map((p) => this.updateGroup(pipe, p, this.listUpd)) : [];
+      this.pUpdatePlain = K === 0 ? plain : null;
+      this.gUpdatePlain = this.pUpdatePlain ? [0, 1].map((p) => this.updateGroup(this.pUpdatePlain!, p, this.listPlain)) : [];
+      this.gUpdateMatch = this.pUpdatePlain ? [0, 1].map((p) => this.updateGroup(pipe, p, this.listMatch)) : [];
       this.compiling = false;
     };
-    if (pUpdate) bindUpdate(pUpdate);
+    if (pUpdate) bindUpdate(pUpdate, pPlain ?? null);
     if (this.speciesGroups > 0) await this.buildSpecies();
     this.redDiag = await diag;
     if (!deferUpdate || !updateP) {
@@ -1127,7 +1150,7 @@ export class AmrSim implements Simulation {
       return;
     }
     this.compiling = true;
-    this.compiled = updateP.then(bindUpdate, (e) => {
+    this.compiled = Promise.all([updateP, plainP]).then(([u, plain]) => bindUpdate(u, plain), (e) => {
       // Nothing awaits a deferred build: say what went wrong where errors are shown.
       if (epoch === this.hydroEpoch) globalThis.dispatchEvent?.(new CustomEvent('shaderous-gpu-error', { detail: `The update pass failed to compile: ${(e as Error)?.message ?? e}` }));
       throw e;
@@ -1240,6 +1263,30 @@ export class AmrSim implements Simulation {
     pass.setBindGroup(0, this.gSpeciesFinal[p][q]);
     this.interior(pass, this.nLeaf);
     this.speciesCur = 1 - q;
+  }
+
+  /**
+   * The update of every leaf from parity p, in one step for all blocks: the leaves with no refined
+   * neighbor through the pipeline without flux matching, where there is one, and the rest through
+   * the full one. (Each leaf writes only its own cells.)
+   */
+  private encodeUpdate(pass: GPUComputePassEncoder, p: number) {
+    if (!this.pUpdatePlain) {
+      pass.setPipeline(this.pUpdate);
+      pass.setBindGroup(0, this.gUpdate[p]);
+      this.interior(pass, this.nLeaf);
+      return;
+    }
+    if (this.nPlain > 0) {
+      pass.setPipeline(this.pUpdatePlain);
+      pass.setBindGroup(0, this.gUpdatePlain[p]);
+      this.interior(pass, this.nPlain);
+    }
+    if (this.nMatch > 0) {
+      pass.setPipeline(this.pUpdate);
+      pass.setBindGroup(0, this.gUpdateMatch[p]);
+      this.interior(pass, this.nMatch);
+    }
   }
 
   private updateGroup(pipe: GPUComputePipeline, p: number, list = this.listLeaf): GPUBindGroup {
@@ -2399,6 +2446,22 @@ export class AmrSim implements Simulation {
     d.queue.writeBuffer(this.bt, 0, this.tree.table() as Int32Array<ArrayBuffer>);
     d.queue.writeBuffer(this.listAll, 0, pack(all));
     d.queue.writeBuffer(this.listLeaf, 0, pack(leaves));
+    // The leaves with a refined neighbor across a face, and the rest (pUpdatePlain).
+    const t = this.tree.table();
+    const faces = this.cfg.ndim === 2 ? 4 : 6;
+    const refinedNext = (s: number) => {
+      for (let f = 0; f < faces; f++) {
+        const nb = t[s * BT_STRIDE + 6 + f];
+        if (nb >= 0 && (t[nb * BT_STRIDE + 4] & 3) !== 3) return true;
+      }
+      return false;
+    };
+    const match = leaves.filter(refinedNext);
+    const plain = leaves.filter((s) => !refinedNext(s));
+    this.nMatch = match.length;
+    this.nPlain = plain.length;
+    d.queue.writeBuffer(this.listMatch, 0, pack(match));
+    d.queue.writeBuffer(this.listPlain, 0, pack(plain));
     byLevel.forEach((l, i) => d.queue.writeBuffer(this.listLevel[i], 0, pack(l)));
     // Only what changed: a re-mesh at a fine level touches a few slabs of the grid.
     const m = (this.n0 / BS) << this.levels;
@@ -2591,9 +2654,7 @@ export class AmrSim implements Simulation {
       pass.setPipeline(this.pPredict);
       pass.setBindGroup(0, this.gPredict);
       this.flat(pass, this.nLeaf, 1);
-      pass.setPipeline(this.pUpdate);
-      pass.setBindGroup(0, this.gUpdate[p]);
-      this.interior(pass, this.nLeaf);
+      this.encodeUpdate(pass, p);
       this.encodeSpecies(pass, p);
       // The radiation moves with the mass fluxes too (amr/rad_advect.wgsl); with implicit pressure,
       // with the whole step's, after the correction.
