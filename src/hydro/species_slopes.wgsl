@@ -10,7 +10,7 @@ const SLOPE_FLOOR: f32 = 1e-6;
 fn mc(a: vec4<f32>, b: vec4<f32>) -> vec4<f32> {
   let c = 0.5 * (a + b);
   let s = sign(c) * min(min(2.0 * abs(a), 2.0 * abs(b)), abs(c));
-  return select(vec4<f32>(0.0), s, a * b > vec4<f32>(0.0));
+  return select(vec4<f32>(0.0), s, sign(a) * sign(b) > vec4<f32>(0.0));
 }
 
 // Slopes of every species of a cell with fractions o, between its neighbors m and p. Each

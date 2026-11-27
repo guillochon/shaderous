@@ -95,6 +95,25 @@ What changed in each release of Shaderous. A release's section here is the body 
 
 ### Fixed
 
+- The predictor's positivity fallback checks each face's density as it will be, signed, rather
+  than the cell's density less half the largest increment either way. With the density along
+  the adiabat, the face below a cell in a column at 0.6 cells per scale height rises to twice the
+  cell's density; read as a fall, it put every cell at first order, which drops the balanced
+  pressure increments, and the column, at rest within 10⁻⁵ of the sound speed before, rose at
+  Mach 5 in a sound crossing (now 1.5×10⁻⁶).
+- The third-order reconstruction judges smoothness at any scale. Its test squared 1% of the
+  density (or pressure) and floored that at 10⁻³⁰, so every difference below about 7×10⁻¹⁶ counted
+  as smooth and was left unlimited, however steep, and above a scale of 2×10¹⁹ the square
+  overflowed to the same effect. Gas thinner than about 10⁻¹⁶ in code units fell to first order
+  at its first step: a column at rest stirred itself up to Mach 0.24 wherever it crossed that
+  density. Where the square is an ordinary single-precision number the arithmetic is as before.
+- Limiters tell a same-signed pair of differences by their signs, not by their product. The
+  product of two differences below about 10⁻¹⁹ underflows single precision to 0, which read as
+  opposite signs and limited the increment to nothing: with the smoothness test above now
+  reaching such thin gas, every cell of an atmosphere thinner than that went to first order in
+  density, and a column at 1.2 cells per scale height from 5×10⁻¹¹ down rose at Mach 15 in a
+  sound crossing (0.87 now; 0.80 before either change). The same test in the other limiters, the
+  adaptive mesh's prolongation, the species' and radiation's slopes is changed alike.
 - **Gas at rest about a point mass stays at rest.** The point masses' pull on the gas was taken
   at each cell's center, while the balanced reconstruction holds a cell's pressure against the
   differences of their potential between cells: the two differed by a third derivative of the
@@ -229,18 +248,6 @@ What changed in each release of Shaderous. A release's section here is the body 
 
 ### Fixed
 
-- The predictor's positivity fallback checks each face's density as it will be, signed, rather
-  than the cell's density less half the largest increment either way. With the density along
-  the adiabat, the face below a cell in a column at 0.6 cells per scale height rises to twice the
-  cell's density; read as a fall, it put every cell at first order, which drops the balanced
-  pressure increments, and the column, at rest within 10⁻⁵ of the sound speed before, rose at
-  Mach 5 in a sound crossing (now 1.5×10⁻⁶).
-- The third-order reconstruction judges smoothness at any scale. Its test squared 1% of the
-  density (or pressure) and floored that at 10⁻³⁰, so every difference below about 7×10⁻¹⁶ counted
-  as smooth and was left unlimited, however steep, and above a scale of 2×10¹⁹ the square
-  overflowed to the same effect. Gas thinner than about 10⁻¹⁶ in code units fell to first order
-  at its first step: a column at rest stirred itself up to Mach 0.24 wherever it crossed that
-  density. Where the square is an ordinary single-precision number the arithmetic is as before.
 - HLLC and its low-Mach version take the HLL flux where gas too cold for its wave speeds gave
   0 / 0 (every flux NaN), and HLLD takes HLLE where the contact speed rounds onto a fast wave.
 - The Helmholtz equation of state starts Newton's iteration for thin hot gas from the ideal gas

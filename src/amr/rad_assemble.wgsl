@@ -71,7 +71,7 @@ fn rc_near(slot: i32, l: vec3<i32>) -> MaybeRC {
 }
 
 fn minmod4(a: vec4<f32>, b: vec4<f32>) -> vec4<f32> {
-  return select(vec4<f32>(0.0), sign(a) * min(abs(a), abs(b)), a * b > vec4<f32>(0.0));
+  return select(vec4<f32>(0.0), sign(a) * min(abs(a), abs(b)), sign(a) * sign(b) > vec4<f32>(0.0));
 }
 
 @compute @workgroup_size(FLAT_WG)

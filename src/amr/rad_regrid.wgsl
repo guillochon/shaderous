@@ -16,7 +16,7 @@
 const RG_STRIDE = 12u;
 
 fn minmod4(a: vec4<f32>, b: vec4<f32>) -> vec4<f32> {
-  return select(vec4<f32>(0.0), sign(a) * min(abs(a), abs(b)), a * b > vec4<f32>(0.0));
+  return select(vec4<f32>(0.0), sign(a) * min(abs(a), abs(b)), sign(a) * sign(b) > vec4<f32>(0.0));
 }
 
 @compute @workgroup_size(8, 8, 4)

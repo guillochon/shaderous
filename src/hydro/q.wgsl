@@ -147,7 +147,7 @@ fn isen_inc(l: Q, c: Q, r: Q, bx: f32, df: f32, sgn: f32) -> vec2<f32> {
   // Less the reference's own increment, which the face adds (hydro/ref_on.wgsl ref_face).
   let a = g_qr.x - g_qs.x;
   let b = g_qs.x - g_ql.x;
-  let rs = select(0.0, select(b, a, abs(a) < abs(b)), a * b > 0.0);
+  let rs = select(0.0, select(b, a, abs(a) < abs(b)), sign(a) * sign(b) > 0.0);
   // The bound (ISEN_CAP and ISEN_ROOM above).
   let ks = clamp(2.0 - max(abs(wl.y - wc.y), abs(wr.y - wc.y)) / (ISEN_SMOOTH * wc.y), 0.0, 1.0);
   let ka = clamp(2.0 - max(abs(tl), abs(tr)) / (ISEN_ADIABAT * wc.x), 0.0, 1.0);

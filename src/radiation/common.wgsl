@@ -49,12 +49,12 @@ const RAD_THETA = vec4<f32>(1.2, 2.0, 2.0, 2.0);
 fn rad_slope(a: vec4<f32>, b: vec4<f32>) -> vec4<f32> {
   let c = 0.5 * (a + b);
   let s = sign(c) * min(min(RAD_THETA * abs(a), RAD_THETA * abs(b)), abs(c));
-  return select(vec4<f32>(0.0), s, a * b > vec4<f32>(0.0));
+  return select(vec4<f32>(0.0), s, sign(a) * sign(b) > vec4<f32>(0.0));
 }
 
 // Monotonized-central slope, componentwise (as mcSlope in reference/radiation.ts).
 fn rad_mc(a: vec4<f32>, b: vec4<f32>) -> vec4<f32> {
   let c = 0.5 * (a + b);
   let s = sign(c) * min(min(2.0 * abs(a), 2.0 * abs(b)), abs(c));
-  return select(vec4<f32>(0.0), s, a * b > vec4<f32>(0.0));
+  return select(vec4<f32>(0.0), s, sign(a) * sign(b) > vec4<f32>(0.0));
 }

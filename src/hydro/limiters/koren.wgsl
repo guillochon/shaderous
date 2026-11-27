@@ -45,12 +45,14 @@ fn edge4(far: vec4<f32>, near: vec4<f32>, scale: vec4<f32>) -> vec4<f32> {
   let qk = fk * fk + nk * nk;
   if (all(select(qk <= vec4<f32>(0.5), q <= 0.5 * ss, as_is))) { return free; }
   let m = min(min(2.0 * abs(far), 2.0 * abs(near)), abs(free));
-  let lim = select(vec4<f32>(0.0), sign(near) * m, far * near > vec4<f32>(0.0));
+  // Same sign by the signs, not by the product: far * near underflows to 0 below about 1e-19
+  // each, and the limited increment with it, so every thin cell of an atmosphere went first order.
+  let lim = select(vec4<f32>(0.0), sign(near) * m, sign(far) * sign(near) > vec4<f32>(0.0));
   let eta = select(qk, q / ss, as_is);
   return mix(lim, free, clamp(1.5 - eta, vec4<f32>(0.0), vec4<f32>(1.0)));
 }
 // Single slope, where one is needed (prolongation on the adaptive mesh): MC.
 fn limit4(a: vec4<f32>, b: vec4<f32>) -> vec4<f32> {
   let m = min(min(2.0 * abs(a), 2.0 * abs(b)), 0.5 * abs(a + b));
-  return select(vec4<f32>(0.0), sign(a) * m, a * b > vec4<f32>(0.0));
+  return select(vec4<f32>(0.0), sign(a) * m, sign(a) * sign(b) > vec4<f32>(0.0));
 }
