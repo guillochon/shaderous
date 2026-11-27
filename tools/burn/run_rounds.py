@@ -12,7 +12,8 @@ arguments, the overshoot penalty and the temperature-slope weight):
   b  a + the overshoot penalty (ow 20)
   c  b + the temperature slope (jw 1; needs tpairs.npz)
 Each round writes round_<r>.json: every variant's scores, the choice, and the time it took.
-BURN_VARIANTS (comma-separated letters) keeps only some variants. A round whose DAgger data
+BURN_VARIANTS (comma-separated letters) keeps only some variants; BURN_UNROLL sets the weight of
+the unrolled term (default 0). A round whose DAgger data
 (data/dagger_<r>.npz) already exists skips its burn, so a run can be restarted mid-round.
 """
 import json
@@ -32,6 +33,10 @@ if os.environ.get("BURN_VARIANTS"):
 # as after a change to the reference burner's physics, which a teacher trained before it lacks.
 TEACHER = os.environ.get("BURN_TEACHER", "aprox13_surrogate.pt")
 TEACH = "0" if TEACHER == "-" else os.environ.get("BURN_TEACH", "1")
+# The weight of train.py's unrolled term (BURN_UNROLL, default 0): stretches of 2 to 32 steps
+# between two times of a reference trajectory, judged where they end, so that the model burns
+# alike whatever the step (Kushnir's test, stepscore.py).
+UNROLL = os.environ.get("BURN_UNROLL", "0")
 
 
 def metric(s):
@@ -76,7 +81,7 @@ def main():
                 continue
             m = f"model_dagger_{r}{v}.pt"
             models.append(m)
-            cmds.append([PY, "train.py", "30000", "128", "4", "4", m, "0.3", "0.2", "flow2f", "1", best, "0", "5e-4",
+            cmds.append([PY, "train.py", "30000", "128", "4", "4", m, "0.3", "0.2", "flow2f", "1", best, UNROLL, "5e-4",
                          "1", "0.3", str(10 * r + i), TEACHER, TEACH, ow, jw])
         codes = run_all(cmds, [f"train_dagger_{Path(m).stem[len('model_dagger_'):]}.log" for m in models], env)
         models = [m for m, c in zip(models, codes) if c == 0 and (HERE / m).exists()]
