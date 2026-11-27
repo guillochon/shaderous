@@ -182,15 +182,20 @@ export async function openSession(opts = {}) {
   // The page's own GPU errors (src/gpu/device.ts: an uncaptured error or a lost device) come out
   // through its 'shaderous-gpu-error' event.
   let gpuError = null;
-  let failRun;
-  const failed = new Promise((_, reject) => (failRun = reject));
-  failed.catch(() => {});
+  let failure = null;
+  // The calls waiting on the page, each with its reject: a GPU error fails them all. (Not a race
+  // against one promise that never settles: each race left a handler on it that held the
+  // call's result, so every result the page returned was kept, and a run that wrote .athdf
+  // files of hundreds of MB filled Node's heap, 1.6 GB a file.)
+  const waiting = new Set();
   await page.exposeFunction('__shaderousGpuError', (detail) => {
     if (gpuError) return;
     gpuError = String(detail).split('\n')[0].slice(0, 500);
     if (opts.stopOnGpuError) {
       log(`  stopping: ${gpuError}`);
-      failRun(new Error(`the page's GPU work failed, so the run cannot go on: ${gpuError}`));
+      failure = new Error(`the page's GPU work failed, so the run cannot go on: ${gpuError}`);
+      for (const reject of waiting) reject(failure);
+      waiting.clear();
     }
   });
   await page.addInitScript(() => addEventListener('shaderous-gpu-error', (e) => globalThis.__shaderousGpuError?.(String(e.detail))));
@@ -208,10 +213,14 @@ export async function openSession(opts = {}) {
   u.search = q.toString();
   log(`shaderous: opening ${u.origin}${u.pathname}`);
   await page.goto(u.toString());
+  // A Vite of its own, with no HTTP server, for loading the page's modules here when the page
+  // is not served by one (--url, or the built page): see call.loadModule below.
+  let moduleServer = null;
   const close = async () => {
     // Not browser.close() alone: on macOS Chrome's crash handler can hold it for good (close.mjs).
     await closeBrowser(browser);
     await server?.close().catch(() => {});
+    await (await moduleServer)?.close().catch(() => {});
   };
   try {
     await page.waitForFunction(() => window.shaderous, undefined, { timeout: 60_000 });
@@ -223,12 +232,18 @@ export async function openSession(opts = {}) {
 
   /** Call window.shaderous[name](...args) in the page; errors come back as plain Errors. */
   const call = async (name, ...callArgs) => {
-    if (opts.stopOnGpuError && gpuError) await failed;
     try {
+      if (failure) throw failure;
       const r = page.evaluate(([n, a]) => window.shaderous[n](...a), [name, callArgs]);
       if (!opts.stopOnGpuError) return await r;
-      r.catch(() => {}); // (left behind when the GPU error wins the race)
-      return await Promise.race([r, failed]);
+      r.catch(() => {}); // (left behind when a GPU error fails the call first)
+      let reject;
+      const stop = new Promise((_, rej) => waiting.add((reject = rej)));
+      try {
+        return await Promise.race([r, stop]);
+      } finally {
+        waiting.delete(reject);
+      }
     } catch (e) {
       throw new Error(pageMessage(e));
     }
@@ -237,6 +252,24 @@ export async function openSession(opts = {}) {
   // uploadAthdf then write and read .athdf files here, where their size is not bounded by the
   // page's memory (a Chromium page holds some 8 GB of arrays in all).
   if (server?.ssrLoadModule) call.loadModule = (id) => server.ssrLoadModule(id);
+  // Not served by Vite (--url, or the built page on a pod): the modules are loaded by a Vite
+  // started here without an HTTP server, if the source is here. Without this, a page-side
+  // .athdf file of a large 3D run is built in the page's WebAssembly memory (at most 4 GB) and
+  // never comes out: a 256^3 white dwarf collision with 3 levels hung writing its file at t = 6.
+  else if (existsSync(path.join(REPO, 'src/io/athdf.ts')) && existsSync(path.join(REPO, 'vite.config.ts'))) {
+    call.loadModule = async (id) => {
+      moduleServer ??= import('vite').then(({ createServer }) => createServer({
+        root: REPO,
+        configFile: path.join(REPO, 'vite.config.ts'),
+        // No HMR or its websocket: only modules are loaded, and the port may be another's.
+        server: { middlewareMode: true, hmr: false, ws: false, watch: null },
+        appType: 'custom',
+        logLevel: 'error',
+        clearScreen: false,
+      }));
+      return (await moduleServer).ssrLoadModule(id);
+    };
+  }
   // The page can fetch a file of this computer's from the server that serves it (viewAthdf).
   if (server) {
     call.serveFile = (file) => {

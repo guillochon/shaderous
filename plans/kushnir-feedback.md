@@ -3,7 +3,7 @@
 **Progress (2026-11-27):** points 1 and 2 are done. The tube and collision sweeps confirmed his
 numbers (`paper/research/measurements.md`; scripts in `tools/burn/limiter/`). The paper, the
 preset tooltips, the option tip and `docs/numerics.md` §20 are rewritten, and both papers are
-cited. The collision's 470 km cell run is still to be added. Point 3: the reference is fixed
+cited. The collision at 470 km cells made 0.40 Msun (added). Point 3: the reference is fixed
 (step 2 below). `build_net.py` builds pynucastro's aprox13, which burns carbon 1.8 times and
 oxygen 3-4 times faster than the first reference. The first reference is kept as
 `aprox13_features.py` for the inputs. The data is not re-labeled and the network is not
