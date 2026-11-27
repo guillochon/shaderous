@@ -49,8 +49,11 @@ export const coldPressure = (s: DegenerateScales, rho: number): number => s.degP
 function rhoOverC2(s: DegenerateScales, rho: number): number {
   if (!(rho > 0)) return 0;
   const x = Math.cbrt(rho / s.degRho);
-  // c^2 = A 8 x^5 / (3 rho sqrt(1 + x^2)), with x^3 = rho / rho_d.
-  const electrons = (3 * s.degRho * x * Math.sqrt(1 + x * x)) / (8 * s.degP);
+  // c^2 = A 8 x^5 / (3 rho sqrt(1 + x^2)), with x^3 = rho / rho_d, so rho / c^2 =
+  // 3 rho_d^2 x sqrt(1 + x^2) / (8 A). (With one rho_d, as it was, every star was built
+  // 1 / rho_d too soft: 2% for carbon and oxygen in white dwarf units, which made a 0.9 M_sun
+  // dwarf 18% denser at the center than the balance the grid settles it to.)
+  const electrons = (3 * s.degRho * s.degRho * x * Math.sqrt(1 + x * x)) / (8 * s.degP);
   // The Coulomb term's c^2 over rho goes to zero with rho (as rho^(1/3)), so this does too.
   return s.coulomb ? electrons / (1 + (electrons * coldCoulomb(s, rho).c2) / rho) : electrons;
 }

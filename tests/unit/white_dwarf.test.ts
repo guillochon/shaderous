@@ -25,6 +25,41 @@ describe('cold white dwarfs', () => {
     }
   });
 
+  it('are in balance with the barotrope they are settled with (h + phi the same throughout)', () => {
+    // In these units rho_d = 0.98: a rho / c^2 with one factor of it, not two, built every star
+    // 2% too soft, h + phi drifting 3% of the central enthalpy from center to surface, and a
+    // 0.9 M_sun dwarf 18% denser at the center than the grid settles it to.
+    expect(Math.abs(scales.degRho - 1)).toBeGreaterThan(0.01);
+    const G = codeG(U);
+    const b = degenerateBarotrope(scales);
+    const hOf = (rho: number) => {
+      let lo = 0;
+      let hi = 1e4;
+      for (let i = 0; i < 200; i++) {
+        const m = 0.5 * (lo + hi);
+        if (b.rhoOfH(m) < rho) lo = m;
+        else hi = m;
+      }
+      return 0.5 * (lo + hi);
+    };
+    for (const M of [0.6, 0.9]) {
+      const wd = whiteDwarf(M, scales, G);
+      const N = 4000;
+      const dr = wd.R / N;
+      const m = [0];
+      for (let i = 1; i <= N; i++) m.push(m[i - 1] + 2 * Math.PI * dr * (((i - 1) * dr) ** 2 * wd.rho((i - 1) * dr) + (i * dr) ** 2 * wd.rho(i * dr)));
+      const phi: number[] = new Array(N + 1);
+      phi[N] = (-G * m[N]) / wd.R;
+      for (let i = N - 1; i >= 0; i--) phi[i] = phi[i + 1] - 0.5 * dr * ((G * m[i + 1]) / ((i + 1) * dr) ** 2 + (i ? (G * m[i]) / (i * dr) ** 2 : 0));
+      const hc = hOf(wd.rhoc);
+      const c0 = hc + phi[0];
+      for (const f of [0.25, 0.5, 0.75, 0.9]) {
+        const i = Math.round(f * N);
+        expect(Math.abs(hOf(wd.rho(i * dr)) + phi[i] - c0) / hc).toBeLessThan(1e-4);
+      }
+    }
+  });
+
   it('are denser and smaller the heavier they are, with a smooth surface', () => {
     const a = whiteDwarf(0.8, scales, codeG(U));
     const b = whiteDwarf(1.0, scales, codeG(U));

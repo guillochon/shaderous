@@ -71,6 +71,14 @@ What changed in each release of Shaderous. A release's section here is the body 
 
 ### Fixed
 
+- **White dwarfs are built at their true radius.** The cold white dwarf a setup starts from was
+  integrated with a sound speed missing a factor of the equation of state's density scale
+  (0.98 in white dwarf units), so every one was built too soft: 3% too small at 0.6 M☉ and 5% at
+  0.9 M☉, and 18% too dense at the center of the 0.9 M☉ one. The grid's settling was right all
+  along and puffed each star back out to its true size, but everything taken from the built
+  star was not: a binary's `fill` placed the orbit from the small radius, so a donor's true
+  fill was 3-5% above the one asked for, and refinement zones sized by the star's radius fell
+  short of it.
 - **Steep atmospheres under a lid stay at rest.** The lower bound on face pressures now follows
   hydrostatic balance. At a reflecting wall it had raised the balanced wall pressure of a column
   with fewer than 2 cells per scale height, and the top cell fell at Mach 0.002 to 0.08 in a
