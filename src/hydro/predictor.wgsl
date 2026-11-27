@@ -54,10 +54,18 @@ fn predictor(q: Q, xm0: Q, xp0: Q, ym0: Q, yp0: Q, zm0: Q, zp0: Q, g: vec3<f32>,
   // are left written out where they are made: in a loop they are issued one after another,
   // and passes bound by memory traffic were 3-10% slower.)
   // Face-to-face difference across the cell along each axis (the mean of its two edge
-  // increments), which drives the half-step evolution; and the larger of the two, for the
-  // positivity check below.
+  // increments), which drives the half-step evolution; and for the positivity check below, the
+  // density's largest fall from the cell to a face, and the larger pressure increment.
+  // (The density is checked face by face, signed. Taken symmetrically, as the pressure is, a
+  // face that rises steeply counted as one that falls as much: in a column at 0.6 cells per
+  // scale height, the density along the adiabat puts the face below a cell at 2.0 times its
+  // density, a twice-increment of 2.05, and every cell went first order, losing the balanced
+  // pressure increments; the column, at rest within 1e-4 of the sound speed with the plain
+  // density, rose at Mach 5. The pressure's increments are those of the balance, alike up and
+  // down.)
   var s: array<Q, 3>;
-  var big = vec2<f32>(0.0);
+  var big = 0.0;
+  var fall = 0.0;
   for (var a = 0; a < 3; a++) {
     if (has_solids()) {
       // A solid neighbor is a wall: the cell sees its own image there.
@@ -78,11 +86,14 @@ fn predictor(q: Q, xm0: Q, xp0: Q, ym0: Q, yp0: Q, zm0: Q, zp0: Q, g: vec3<f32>,
       ru = vec2<f32>(g_rds[a], -g_qs.x * hi.face[a]);
       rd = vec2<f32>(g_rds[a], -g_qs.x * lo.face[a]);
     }
-    big = max(big, vec2<f32>(abs(u.a.x + ru.x), abs(u.b.x + ru.y)));
-    if (!LIMITER_SYMMETRIC) {
+    big = max(big, abs(u.b.x + ru.y));
+    if (LIMITER_SYMMETRIC) {
+      fall = min(fall, -0.5 * abs(u.a.x + ru.x));
+    } else {
       let d = edge_dn(m[a], q, p[a], dl[a], dr[a], lo.face[a]);
       sa = Q(0.5 * (u.a + d.a), 0.5 * (u.b + d.b));
-      big = max(big, vec2<f32>(abs(d.a.x + rd.x), abs(d.b.x + rd.y)));
+      big = max(big, abs(d.b.x + rd.y));
+      fall = min(fall, min(0.5 * (u.a.x + ru.x), -0.5 * (d.a.x + rd.x)));
     }
     s[a] = Q(sa.a * mask[a], sa.b * mask[a]);
   }
@@ -186,8 +197,8 @@ fn predictor(q: Q, xm0: Q, xp0: Q, ym0: Q, yp0: Q, zm0: Q, zp0: Q, g: vec3<f32>,
   // Positivity: if any face state would be non-positive, this cell is first order this step
   // (unpredicted state, and the update zeroes its slopes).
   // (Of the whole density and pressure, for a gas stored as its deviation from a reference.)
-  let rmin = a.x + g_qs.x - 0.5 * big.x;
-  let pmin = b.x + g_qs.y - 0.5 * big.y;
+  let rmin = a.x + g_qs.x + fall;
+  let pmin = b.x + g_qs.y - 0.5 * big;
   var first_order = 0.0;
   if (!(rmin > 0.0 && (pmin > 0.0 || p_signed()))) {
     a = q.a;

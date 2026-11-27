@@ -229,6 +229,12 @@ What changed in each release of Shaderous. A release's section here is the body 
 
 ### Fixed
 
+- The predictor's positivity fallback checks each face's density as it will be, signed, rather
+  than the cell's density less half the largest increment either way. With the density along
+  the adiabat, the face below a cell in a column at 0.6 cells per scale height rises to twice the
+  cell's density; read as a fall, it put every cell at first order, which drops the balanced
+  pressure increments, and the column, at rest within 10⁻⁵ of the sound speed before, rose at
+  Mach 5 in a sound crossing (now 1.5×10⁻⁶).
 - HLLC and its low-Mach version take the HLL flux where gas too cold for its wave speeds gave
   0 / 0 (every flux NaN), and HLLD takes HLLE where the contact speed rounds onto a fast wave.
 - The Helmholtz equation of state starts Newton's iteration for thin hot gas from the ideal gas
