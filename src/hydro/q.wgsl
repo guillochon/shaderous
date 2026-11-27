@@ -74,34 +74,66 @@ fn wb_above(c: Q, r: Q, dr: f32) -> vec4<f32> {
 // gas): what is limited is each neighbor's density brought to the cell's pressure adiabatically,
 // rho_n (p_c / p_n)^(1/gamma), the analog for the entropy of what the balanced reconstruction
 // does for the pressure, and the face density is that reconstruction carried to the face's
-// pressure along the adiabat. In a layer at the adiabat the limited quantity is flat, and the
-// face states keep the cell's entropy. Limited as it is, the density changes by about a part in a
-// hundred per cell in a layer a hundred cells per scale height deep, where the limiter's switch
-// lies, and the faces of a layer at the adiabat came out off it by (dx / H)^2: a layer 1e-5 of
-// the adiabatic gradient on the stable side convected at Mach 0.008 (docs/numerics.md section 7).
+// pressure along the adiabat, kept between the densities of the cell and its neighbor beyond the
+// face. In a layer at the adiabat the limited quantity is flat, and the face states keep the
+// cell's entropy. Limited as it is, the density changes by about a part in a hundred per cell in a
+// layer a hundred cells per scale height deep, where the limiter's switch lies, and the faces of a
+// layer at the adiabat came out off it by (dx / H)^2: a layer 1e-5 of the adiabatic gradient on
+// the stable side convected at Mach 0.008 (docs/numerics.md section 7).
 // It works on the whole densities and pressures. For a gas stored as its deviation from a
 // reference, the references of the increment's middle cell (g_qs) and of its lower and upper
 // neighbors (g_ql, g_qr), which the callers set, make them; zero otherwise.
+//
+// Where the gas is not on one smooth adiabat it does harm: across a shock, in a reaction zone,
+// in cold gas falling at several times its sound speed (where its pressure, and so the density
+// tied to it, is the least certain part of the state). Unchecked it made a Sedov blast 1.7 cells
+// out of round, drifted the Evrard collapse's energy 4.8% and slowed a detonation front by 1.2%.
+// It is not switched off there: what it adds to the plain density's increment is bounded instead,
+// by ISEN_CAP of the smaller density step to a neighbor, or by ISEN_ROOM of the density where the
+// gas is smooth (the pressure changing by less than ISEN_SMOOTH from cell to cell, the neighbors'
+// densities at the cell's pressure within ISEN_ADIABAT of the cell's, and the velocity changing
+// by less than ISEN_SHEAR of the sound speed), that room falling to none at twice each of those
+// bounds, continuously. In a stratified layer or slow convection the room is far more than the
+// correction, (dx / H)^2 of the density, and the reconstruction acts in full; across a shock it
+// moves the face by a quarter of a step at most.
+// (Switches, and weights blending the two reconstructions, both failed. A switch turned a
+// difference of rounding into one of method in the cells where it flipped: a Sedov blast in an
+// octant differed from the whole box by 1.5e-5 in density, against 2e-6. A weight, however
+// smooth, fed back through the large difference between the two reconstructions at a shock: in
+// the converging flow onto a sink the whole box's own mirror asymmetry grew to 5e-3 by step 64
+// with switches and 7.5e-3 with weights, against 1.4e-6 with the plain density. Bounding the
+// correction instead, its gain is that of the bound, ISEN_ROOM of the density over the guards'
+// bounds at most: 1.8e-4 by step 218, against 3.8e-5 with the plain density.)
 const ISEN_SMOOTH: f32 = 0.2;
+// A departure from one adiabat, per cell, as a fraction of the density: the limiter's own
+// measure of smoothness (limiters/koren.wgsl SMOOTH). A layer 1e-2 off the adiabat, 50 cells per
+// scale height deep, departs by 1e-4 per cell. A detonation's reaction zone is smooth in pressure
+// but heated.
+const ISEN_ADIABAT: f32 = 0.01;
+// A change of velocity from cell to cell, as a fraction of the sound speed: gas falling onto a
+// sink at Mach 3 changes by 0.2 to 0.3 per cell; convection at Mach 0.01 by far less.
+const ISEN_SHEAR: f32 = 0.1;
+// The bounds on the correction: a fraction of the smaller density step to a neighbor, and of the
+// density where the gas is smooth. With the first at 0.5, the Evrard collapse's energy drifted
+// 0.63% (0.23% with the plain density); with the second everywhere at 1% (no guards), a
+// detonation's reaction zone was left in part at a coarser level of the mesh; at 5%, the converging
+// flow onto a sink was unstable, or with the velocity guard a Sedov blast in an octant differed
+// from the whole box by 3.2e-5.
+const ISEN_CAP: f32 = 0.25;
+const ISEN_ROOM: f32 = 0.01;
 var<private> g_ql: vec2<f32> = vec2<f32>(0.0);
 var<private> g_qr: vec2<f32> = vec2<f32>(0.0);
-// Only with the balanced reconstruction (a potential to balance against): it is stratification
-// that it is for, and without one it only changed blasts (a Sedov blast 1.7 cells out of round
-// against 1.5 with the plain density).
-fn isen_on() -> bool { return (P.flags & 128u) != 0u && well_balanced() && EOS_HAS_ENERGY && !p_signed(); }
+fn isen_on() -> bool { return (P.flags & 128u) != 0u && EOS_HAS_ENERGY && !p_signed(); }
 // Twice the increment of the cell's stored density toward a face (sgn 1, its upper face) or from
 // one (sgn -1, its lower face), given the pressure increment bx the cell returns there and the
-// potential step df it was given; -1e30 where a density or pressure is not positive.
-fn isen_inc(l: Q, c: Q, r: Q, bx: f32, df: f32, sgn: f32) -> f32 {
+// potential step df it was given, and the bound on its difference from the plain increment (0
+// where a density or pressure is not positive).
+fn isen_inc(l: Q, c: Q, r: Q, bx: f32, df: f32, sgn: f32) -> vec2<f32> {
   let gi = 1.0 / P.eos.x;
   let wl = vec2<f32>(l.a.x, l.b.x) + g_ql;
   let wc = vec2<f32>(c.a.x, c.b.x) + g_qs;
   let wr = vec2<f32>(r.a.x, r.b.x) + g_qr;
-  if (!(all(wl > vec2<f32>(0.0)) && all(wc > vec2<f32>(0.0)) && all(wr > vec2<f32>(0.0)))) { return -1e30; }
-  // Only where the pressure is smooth (within 20% from cell to cell; a layer 50 cells per scale
-  // height changes by 2%): across a shock the gas is not on one adiabat, and there it drifted
-  // the Evrard collapse's energy by 4.8% (0.23% with the plain density).
-  if (abs(wl.y - wc.y) > ISEN_SMOOTH * wc.y || abs(wr.y - wc.y) > ISEN_SMOOTH * wc.y) { return -1e30; }
+  if (!(all(wl > vec2<f32>(0.0)) && all(wc > vec2<f32>(0.0)) && all(wr > vec2<f32>(0.0)))) { return vec2<f32>(0.0); }
   // The neighbors' densities at the cell's pressure, less the cell's.
   let tl = wl.x * pow(wc.y / wl.y, gi) - wc.x;
   let tr = wr.x * pow(wc.y / wr.y, gi) - wc.x;
@@ -110,21 +142,28 @@ fn isen_inc(l: Q, c: Q, r: Q, bx: f32, df: f32, sgn: f32) -> f32 {
   let d = edge4(vec4<f32>(far, 0.0, 0.0, 0.0), vec4<f32>(near, 0.0, 0.0, 0.0), vec4<f32>(wc.x, 1.0, 1.0, 1.0)).x;
   // The whole pressure at the face: the deviation's increment and the reference's along its balance.
   let pf = wc.y + 0.5 * sgn * (bx - g_qs.x * df);
-  let rf = (wc.x + 0.5 * sgn * d) * pow(max(pf, 1e-30) / wc.y, gi);
+  let wn = select(wl.x, wr.x, sgn > 0.0);
+  let rf = clamp((wc.x + 0.5 * sgn * d) * pow(max(pf, 1e-30) / wc.y, gi), min(wc.x, wn), max(wc.x, wn));
   // Less the reference's own increment, which the face adds (hydro/ref_on.wgsl ref_face).
   let a = g_qr.x - g_qs.x;
   let b = g_qs.x - g_ql.x;
   let rs = select(0.0, select(b, a, abs(a) < abs(b)), a * b > 0.0);
-  return 2.0 * sgn * (rf - wc.x) - rs;
+  // The bound (ISEN_CAP and ISEN_ROOM above).
+  let ks = clamp(2.0 - max(abs(wl.y - wc.y), abs(wr.y - wc.y)) / (ISEN_SMOOTH * wc.y), 0.0, 1.0);
+  let ka = clamp(2.0 - max(abs(tl), abs(tr)) / (ISEN_ADIABAT * wc.x), 0.0, 1.0);
+  let kv = clamp(2.0 - max(length(r.a.yzw - c.a.yzw), length(c.a.yzw - l.a.yzw)) / (ISEN_SHEAR * max(c.b.z, 1e-30)), 0.0, 1.0);
+  let bound = max(ISEN_CAP * min(abs(wc.x - wl.x), abs(wr.x - wc.x)), ISEN_ROOM * wc.x * ks * ka * kv);
+  return vec2<f32>(2.0 * sgn * (rf - wc.x) - rs, bound);
+}
+// The plain density increment x moved toward the one along the adiabat, by its bound at most.
+fn isen_blend(x: f32, i: vec2<f32>) -> f32 {
+  return x + clamp(i.x - x, -i.y, i.y);
 }
 fn edge_up(l: Q, c: Q, r: Q, dl: f32, dr: f32, df: f32) -> Q {
   var b = edge4(wb_below(l, c, dl), wb_above(c, r, dr), vec4<f32>(p_scale(c), 0.0, c.b.z, 0.0));
   b.x -= c.a.x * df;
   var a = edge4(c.a - l.a, r.a - c.a, vec4<f32>(c.a.x + g_qs.x, c.b.zzz));
-  if (isen_on()) {
-    let i = isen_inc(l, c, r, b.x, df, 1.0);
-    if (i > -1e29) { a.x = i; }
-  }
+  if (isen_on()) { a.x = isen_blend(a.x, isen_inc(l, c, r, b.x, df, 1.0)); }
   return Q(a, b);
 }
 fn edge_dn(l: Q, c: Q, r: Q, dl: f32, dr: f32, df: f32) -> Q {
@@ -135,11 +174,14 @@ fn edge_dn(l: Q, c: Q, r: Q, dl: f32, dr: f32, df: f32) -> Q {
     b = edge4(wb_above(c, r, dr), wb_below(l, c, dl), vec4<f32>(p_scale(c), 0.0, c.b.z, 0.0));
   }
   b.x -= c.a.x * df;
-  if (LIMITER_SYMMETRIC) { return Q(edge4(c.a - l.a, r.a - c.a, vec4<f32>(c.a.x + g_qs.x, c.b.zzz)), b); }
-  var a = edge4(r.a - c.a, c.a - l.a, vec4<f32>(c.a.x + g_qs.x, c.b.zzz));
-  if (isen_on()) {
-    let i = isen_inc(l, c, r, b.x, df, -1.0);
-    if (i > -1e29) { a.x = i; }
+  var a: vec4<f32>;
+  if (LIMITER_SYMMETRIC) {
+    a = edge4(c.a - l.a, r.a - c.a, vec4<f32>(c.a.x + g_qs.x, c.b.zzz));
+  } else {
+    a = edge4(r.a - c.a, c.a - l.a, vec4<f32>(c.a.x + g_qs.x, c.b.zzz));
   }
+  // (With either kind of limiter: a symmetric one's lower face took the plain density while its
+  // upper face took this, one side of every cell reconstructed one way and the other another.)
+  if (isen_on()) { a.x = isen_blend(a.x, isen_inc(l, c, r, b.x, df, -1.0)); }
   return Q(a, b);
 }

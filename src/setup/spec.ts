@@ -145,7 +145,7 @@ export interface PhysicsSpec {
   pressure?: 'explicit' | 'implicit';
   /** the gas stored as its deviation from a reference state (SimConfig.reference): 'uniform' without gravity, 'column' in a uniform field */
   reference?: 'off' | 'uniform' | 'column';
-  /** the density reconstructed along the adiabat where there is gravity (SimConfig.isentropicRecon); on by default */
+  /** the density reconstructed along the adiabat, bounded where the gas is not smooth (SimConfig.isentropicRecon); on by default */
   isentropicRecon?: boolean;
   /** obstacles cut the cells they cross (SimConfig.cutCells): the liquid with implicit pressure */
   cutCells?: boolean;

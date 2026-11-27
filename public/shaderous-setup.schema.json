@@ -755,7 +755,7 @@
     "isentropicRecon": {
      "type": "boolean",
      "title": "Density along the adiabat",
-     "description": "With gravity, reconstruct the density from each neighbor brought to the cell’s pressure along the adiabat, as the balanced reconstruction does the pressure along hydrostatic balance, where the pressure is smooth. Then a layer at the adiabat keeps its entropy at the faces of its cells: with the density reconstructed as it is, a layer stable by a part in 100,000 of the adiabatic gradient convected at Mach 0.008 on 128 cells. For the ideal gas"
+     "description": "Reconstruct the density from each neighbor brought to the cell’s pressure along the adiabat, as the balanced reconstruction does the pressure along hydrostatic balance. Where the gas is not smooth (across shocks, in reaction zones, in fast infall) its change to the face density is bounded to a quarter of the density step. Then a layer at the adiabat keeps its entropy at the faces of its cells: with the density reconstructed as it is, a layer stable by a part in 100,000 of the adiabatic gradient convected at Mach 0.008 on 128 cells. For the ideal gas"
     },
     "cutCells": {
      "type": "boolean",

@@ -295,11 +295,15 @@ export const SHEAR_TESTS: TestDef[] = [
   {
     id: 'shear-epicycle',
     name: 'Shearing box: epicycles',
-    criterion: 'A uniform kick of 0.01 along x on the background flow of a Keplerian sheet (2D, 32^2) oscillates at the epicyclic frequency kappa = sqrt(2 (2 - q)) Omega: after one epicycle the kick is back to within 1e-3 of itself in phase and amplitude, and the epicyclic energy (dv_x^2 + 2 dv_y^2 / (2 - q)) / 2 keeps to 1e-4 throughout',
+    criterion: 'A uniform kick of 0.1 along x (Mach 0.08) on the background flow of a Keplerian sheet (2D, 32^2) oscillates at the epicyclic frequency kappa = sqrt(2 (2 - q)) Omega: after one epicycle the kick is back to within 1e-3 of itself in phase and amplitude, and the epicyclic energy (dv_x^2 + 2 dv_y^2 / (2 - q)) / 2 keeps to 1e-4 throughout',
     async run(gpu) {
       const kappa = Math.sqrt(2 * (2 - Q)) * OMEGA;
       const period = (2 * Math.PI) / kappa;
-      const kick = 0.01;
+      // Large enough that the scheme's own error is measured, 6e-5 of the energy: the rounding of
+      // the velocities against the background flow, +-0.75, moves the box's mean velocity by a
+      // few 1e-7, which was 1e-4 of the energy of a kick of 0.01 (2e-3 of one of 0.001) and turned
+      // with any change to the rounding (with the density reconstructed along the adiabat or not).
+      const kick = 0.1;
       return withSim(gpu, sheet(0, (x) => ({ vx: kick, vy: -Q * OMEGA * x })), 32, { ndim: 2 }, async (sim) => {
         const energy = (d: { momentum: number[]; mass: number }) => {
           const vx = d.momentum[0] / d.mass;

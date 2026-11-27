@@ -2375,6 +2375,7 @@ export const TESTS: TestDef[] = [
           nx: n, ny: n, nz: n, dx: prob.box / n, eos: makeEos(cfg.eos, cfg.eosParams), bcLo: cfg.bcLo, bcHi: cfg.bcHi,
           cfl: cfg.cfl, rhoFloor: cfg.rhoFloor, pFloor: cfg.pFloor, etaDual: cfg.etaDual, shockThresh: cfg.shockThresh,
           riemann: cfg.riemann === 'hll' ? 'hll' : 'hllc', limiter: cfg.limiter,
+          isentropic: cfg.isentropicRecon && cfg.eos === 'ideal',
         });
         ref.init(prob.init(n, ref.cfg.eos, 3, {}));
         for (let i = 0; i < 20; i++) ref.step();

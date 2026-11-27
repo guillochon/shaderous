@@ -722,10 +722,15 @@ export const CYL_TESTS: TestDef[] = [
   {
     id: 'cyl-column',
     name: 'Axisymmetric: a stratified column at rest under gravity along the axis',
-    criterion: 'An isothermal column in discrete balance under a uniform field along z (64^2 in (R, z), walls all round): after a sound crossing the largest Mach number stays below 1e-4, as the Cartesian column does',
+    criterion: 'An isothermal column in discrete balance under a uniform field along z (32^2 in (R, z), 4 cells per scale height, walls all round): after a sound crossing the largest Mach number stays below 1e-4, as the Cartesian column does',
     async run(gpu) {
-      const n = 64;
-      const g = 16;
+      // 32 cells, 4 per scale height: a density contrast of 4e-4 from bottom to top. On 64 cells
+      // at the same steepness it was 1e-7, and rounding of order 1e-7, carried up the column by
+      // waves that grow as rho^(-1/2), reached Mach 1e-4 by itself (about 1.7e-4 by
+      // docs/numerics.md section 8): builds that differed only in rounding gave 7.5e-5, 1.0e-4
+      // and 1.7e-4. Here that floor is about 3e-6, and the test sees the balance alone.
+      const n = 32;
+      const g = 8;
       const a = g / n / 2;
       const q = (1 - a) / (1 + a);
       const p = ring((_R, z) => {

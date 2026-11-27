@@ -221,8 +221,8 @@ export interface SimConfig {
    * The density reconstructed along the adiabat (hydro/q.wgsl isen_on, P.flags bit 7): what is
    * limited is each neighbor's density brought to the cell's pressure adiabatically, so that a
    * stratified layer's face states keep its entropy (docs/numerics.md section 8). For the ideal
-   * gas with the balanced reconstruction (a potential), where the pressure is smooth; on by
-   * default.
+   * gas; what it changes is bounded where the gas is not smooth (shocks, reaction zones, fast
+   * infall). On by default.
    */
   isentropicRecon: boolean;
   /**

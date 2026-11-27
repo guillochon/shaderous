@@ -29,16 +29,23 @@ What changed in each release of Shaderous. A release's section here is the body 
   10⁻⁴ on 128 cells the scheme's own error in the buoyancy drives the flow instead
   (docs/numerics.md section 7): deep stellar convection is not within reach yet.
 - **Density along the adiabat** (Solver: Density along the adiabat; `physics.isentropicRecon`,
-  link key `isen`; on by default): for the ideal gas with gravity, the density is reconstructed
-  from each neighbor brought to the cell's pressure along the adiabat, as the balanced
-  reconstruction does the pressure along hydrostatic balance, where the pressure changes by
-  less than 20% from cell to cell (docs/numerics.md section 8). The density reconstructed as it
-  was put the faces of a stratified layer off its adiabat by about (dx / H)², and a layer stable
-  by 10⁻⁵ of the adiabatic gradient convected at Mach 0.008 on 128 cells, gaining 20 times its
-  kinetic energy; now it keeps it, and a layer at the adiabat gains 1.4 times instead of 17. The
-  floor below which a convecting layer's speed is the grid's and not its stratification's falls
-  from between 10⁻³ and 10⁻² of the adiabatic gradient to about 10⁻⁴ on 128 cells. Results of
-  ideal-gas runs with gravity change where the pressure is smooth.
+  link key `isen`; on by default): for the ideal gas, the density is reconstructed from each
+  neighbor brought to the cell's pressure along the adiabat, as the balanced reconstruction does
+  the pressure along hydrostatic balance (docs/numerics.md section 8). The density reconstructed
+  as it was put the faces of a stratified layer off its adiabat by about (dx / H)², and a
+  layer stable by 10⁻⁵ of the adiabatic gradient convected at Mach 0.008 on 128 cells, gaining
+  20 times its kinetic energy. Now a layer at the adiabat gains 2 times instead of 14 by
+  t = 1000, and one convecting at an excess of 10⁻⁴ keeps convecting (10 times its starting
+  kinetic energy) where with the plain density it dies away. Across shocks, in reaction zones
+  and in fast infall it would do harm (unchecked, a Sedov blast 1.7 cells out of round, the
+  Evrard collapse's energy drifting 4.8%, a detonation slowed 1.2%), so what it changes is
+  bounded there, continuously, rather than switched off: switches turned rounding into a
+  difference of method (a Sedov octant differed from the whole box by 1.5e-5), and weights fed
+  back at shocks (a sink's converging flow lost its symmetry, 5e-3 in 64 steps). The blast is
+  1.07 cells out of round (1.10 before), the collapse drifts 0.31% (0.23%), the detonation's
+  speed is off 0.075% (0.12%). With a symmetric limiter (MC, van Leer, minmod) a cell's lower
+  face had taken the plain density and its upper face this one; both take it now. Results of
+  ideal-gas runs change.
 
 - **Several profiles at once.** Each line the Profile tool places is added to those on show, up
   to six, each in a colour of its own and numbered; their plots are overlaid in one panel, one
@@ -99,6 +106,13 @@ What changed in each release of Shaderous. A release's section here is the body 
   Mach 1e-6 at a hundredth of c^2 and 4e-5 at one c^2.
 - **A movie's frame holds no longer touch the clock.** Banking a held step, of no length, folded
   the compensation of the clock's summation into its time.
+- **HLLC is exact at rest.** It formed its star state's density as rho (S - u) / (S - S*) and
+  the flux from that less rho, which at a face at rest is rho S / S - rho: up to 10⁻⁷ of the
+  density, every step, carried up a stratified column by waves that grow as the gas thins. It
+  now forms the difference as rho (S* - u) / (S - S*), zero there (and likewise the momentum and
+  energy). The Rayleigh-Taylor layers at rest stay exactly still with the density along the
+  adiabat, which they did not with the old form. Results of every HLLC run change at the
+  rounding level.
 - **Stars load in seconds.** A white dwarf's initial conditions asked the tabulated equation of
   state for the same ambient gas's energy in every cell (91% of a 0.6 M☉ dwarf's box at 128³):
   it now remembers its last answers, exactly, and a run with species keeps one equation of state

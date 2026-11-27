@@ -20,6 +20,8 @@ export interface RefConfig {
   shockThresh: number;
   riemann: 'hllc' | 'hll';
   limiter: 'mc' | 'vanleer' | 'minmod' | 'koren';
+  /** the density reconstructed along the adiabat (SimConfig.isentropicRecon), for the ideal gas */
+  isentropic?: boolean;
 }
 
 /** Edge increment from the differences (far, near) and the quantity's natural scale. */
@@ -38,6 +40,43 @@ export const LIMITERS: Record<RefConfig['limiter'], Limiter> = {
     return lim + (free - lim) * w;
   },
 };
+
+/** Smoothness of the gas within which the density along the adiabat acts in full (hydro/q.wgsl): the pressure's change from cell to cell, */
+export const ISEN_SMOOTH = 0.2;
+/** the departure from one adiabat per cell, */
+export const ISEN_ADIABAT = 0.01;
+/** and the velocity's change over the sound speed. */
+export const ISEN_SHEAR = 0.1;
+/** Bounds on its correction to the plain increment: of the smaller density step, and of the density where the gas is smooth. */
+export const ISEN_CAP = 0.25;
+export const ISEN_ROOM = 0.01;
+
+/**
+ * As hydro/q.wgsl isen_inc, without gravity: twice the density increment toward a cell's upper
+ * face (up) or from its lower face, reconstructed along the adiabat, given the cell and its two
+ * neighbors (density at 0, velocity at 1 to 3, pressure at 4, sound speed at 6) and the pressure
+ * increment at that face, and the bound on its difference from the plain increment (0 where a
+ * density or pressure is not positive).
+ */
+export function isenInc(m: ArrayLike<number>, q: ArrayLike<number>, p: ArrayLike<number>, pInc: number, up: boolean, lim: Limiter, gamma: number): [number, number] {
+  const [rl, pl, rc, pc, rr, pr] = [m[0], m[4], q[0], q[4], p[0], p[4]];
+  if (!(rl > 0 && pl > 0 && rc > 0 && pc > 0 && rr > 0 && pr > 0)) return [0, 0];
+  const gi = 1 / gamma;
+  const tl = rl * (pc / pl) ** gi - rc;
+  const tr = rr * (pc / pr) ** gi - rc;
+  const sgn = up ? 1 : -1;
+  const d = up ? lim(-tl, tr, rc) : lim(tr, -tl, rc);
+  const pf = pc + 0.5 * sgn * pInc;
+  const rn = up ? rr : rl;
+  const rf = Math.min(Math.max((rc + 0.5 * sgn * d) * (Math.max(pf, 1e-30) / pc) ** gi, Math.min(rc, rn)), Math.max(rc, rn));
+  const fade = (x: number) => Math.min(Math.max(2 - x, 0), 1);
+  const dv = (a: ArrayLike<number>, b: ArrayLike<number>) => Math.hypot(a[1] - b[1], a[2] - b[2], a[3] - b[3]);
+  const ks = fade(Math.max(Math.abs(pl - pc), Math.abs(pr - pc)) / (ISEN_SMOOTH * pc));
+  const ka = fade(Math.max(Math.abs(tl), Math.abs(tr)) / (ISEN_ADIABAT * rc));
+  const kv = fade(Math.max(dv(p, q), dv(q, m)) / (ISEN_SHEAR * Math.max(q[6], 1e-30)));
+  const bound = Math.max(ISEN_CAP * Math.min(Math.abs(rc - rl), Math.abs(rr - rc)), ISEN_ROOM * rc * ks * ka * kv);
+  return [2 * sgn * (rf - rc), bound];
+}
 
 interface Side {
   rho: number;
@@ -213,6 +252,14 @@ export class RefHydro {
     return rate;
   }
 
+  /** The density increment of `out` moved toward the one along the adiabat, by its bound at most (isenInc). */
+  private isen(out: Float64Array, m: ArrayLike<number>, q: ArrayLike<number>, p: ArrayLike<number>, up: boolean) {
+    const c = this.cfg;
+    if (!c.isentropic || !c.eos.hasEnergy) return;
+    const [i, b] = isenInc(m, q, p, out[4], up, LIMITERS[c.limiter], c.eos.params.gamma);
+    out[0] += Math.min(Math.max(i - out[0], -b), b);
+  }
+
   /** Natural scale of each primitive at a cell, by which the limiter judges smoothness. */
   private static scales(q: ArrayLike<number>): number[] {
     return [q[0], q[6], q[6], q[6], q[4], 0];
@@ -231,11 +278,13 @@ export class RefHydro {
     const su = nb.map(([m, p]) => {
       const out = new Float64Array(NQ);
       for (let v = 0; v < NQ; v++) out[v] = lim(q[v] - m[v], p[v] - q[v], scale[v]);
+      this.isen(out, m, q, p, true);
       return out;
     });
     const sd = nb.map(([m, p]) => {
       const out = new Float64Array(NQ);
       for (let v = 0; v < NQ; v++) out[v] = lim(p[v] - q[v], q[v] - m[v], scale[v]);
+      this.isen(out, m, q, p, false);
       return out;
     });
     // Face-to-face difference across the cell, which drives the half-step evolution.
@@ -296,6 +345,7 @@ export class RefHydro {
         const m = this.loadQ(i - a, j - b, k - d);
         const pl = this.loadQ(i + a, j + b, k + d);
         for (let v = 0; v < NQ; v++) out[v] = up ? lim(w[v] - m[v], pl[v] - w[v], scale[v]) : lim(pl[v] - w[v], w[v] - m[v], scale[v]);
+        this.isen(out, m, w, pl, up);
         return out;
       });
     return { q, su: edges(true), sd: edges(false), flag: src.flag, firstOrder: src.firstOrder };

@@ -397,8 +397,8 @@ reconstructed as it is, a layer stable by $`\delta = -10^{-5}`$ gained 20 times 
 energy by $`t = 1000`$, to Mach 0.008, as did every layer from $`\delta = 0`$ to $`10^{-5}`$,
 with the reference or without (on 256 cells the neutral layer's grew 1.9 times); one stable by
 $`10^{-3}`$ lost 89% of it. The faces' entropy was off by about $`(\Delta x/H)^2`$; with the
-density reconstructed along the adiabat ([§8](#8-well-balanced-reconstruction)), the default
-with gravity, the layer stable by $`10^{-5}`$ keeps its kinetic energy and the neutral one gains
+density reconstructed along the adiabat ([§8](#8-well-balanced-reconstruction)), the default for
+the ideal gas (as first made, in its unbounded form), the layer stable by $`10^{-5}`$ keeps its kinetic energy and the neutral one gains
 1.4 times. The *Convection* preset is this layer at $`\delta = 0.01`$: its cells settle at Mach
 0.07 to 0.1 with a kinetic energy of $`4.8\times10^{-4}`$ on 128 cells ($`6.8\times10^{-4}`$
 on 256 with the plain density), and the speed goes as $`\sqrt{\delta}`$: Mach 0.27 at
@@ -408,14 +408,14 @@ $`10^{-4}`$ on 128 cells the grid's error still sets the flow; with the plain de
 floor lay between $`10^{-3}`$ and $`10^{-2}`$, the cells at $`10^{-3}`$ peaking at Mach 0.045 and
 sinking to it.
 
-The columns also needed HLLC to be exact at rest ([§6](#hllc-default)): it forms its star
+The columns also needed HLLC to be exact at rest ([§6](#hllc-default)): it formed its star
 state's density as $`\rho(S - u)/(S - S^*)`$ and the flux from that less $`\rho`$, which at a
-face at rest is $`\rho S/S - \rho`$, $`10^{-7}`$ of the density, every step. With a reference
-it forms the difference directly, $`\rho(S^* - u)/(S - S^*)`$, zero there, and likewise for the
-momentum and energy: without it the $`h = 0.6`$ column above reached Mach 1.7. Without a
-reference the original form is kept. The two differ only in rounding, which is one among
-others of that size there; the axisymmetric column of the validation suite, at that floor,
-went from Mach $`7.5\times10^{-5}`$ to $`1.7\times10^{-4}`$ with the new form.
+face at rest is $`\rho S/S - \rho`$, up to $`10^{-7}`$ of the density, every step. It now forms
+the difference directly, $`\rho(S^* - u)/(S - S^*)`$, zero there, and likewise for the
+momentum and energy: without it the $`h = 0.6`$ column above reached Mach 1.7, and the
+Rayleigh-Taylor layers at rest, exactly still before, moved at Mach $`10^{-6}`$ once the density
+was reconstructed along the adiabat (whether $`\rho S/S - \rho`$ rounds to zero depends on the
+bits of $`\rho`$).
 
 ## 8. Well-balanced reconstruction
 
@@ -473,17 +473,68 @@ $`t = 1000`$, and so did one stable by $`10^{-5}`$ of the adiabatic gradient
 ([§7](#deviations-from-a-reference)); the more compressive the limiter, the more (at
 $`t = 300`$: Koren 2.9 times, MC 1.4, van Leer 1.1; minmod damped it to 0.24).
 
-So for the ideal gas, where there is a potential, the density is reconstructed the way the
-pressure is: what is limited is each neighbor's density brought to the cell's pressure along
-the adiabat, $`\rho_n (p_c/p_n)^{1/\gamma}`$, flat in a layer at the adiabat, and the face
-density is that reconstruction carried to the face's pressure along the adiabat
-(`hydro/q.wgsl` `isen_inc`, on whole densities and pressures with a reference state too). It
-applies only where the pressure changes by less than 20% from cell to cell: across a shock the
-gas is not on one adiabat, and there it drifted the Evrard collapse's energy by 4.8% (0.23%
-without), and without a potential it only made a Sedov blast less round. With it the layer
-stable by $`10^{-5}`$ keeps its kinetic energy (1.0 times by $`t = 1000`$ with a reference
-state, 1.4 without), the layer at the adiabat gains 1.4 times (1.6 without a reference), and
-resolved convection is unchanged. `physics.isentropicRecon` (link key `isen`) turns it off.
+So for the ideal gas the density is reconstructed the way the pressure is: what is limited is
+each neighbor's density brought to the cell's pressure along the adiabat,
+$`\rho_n (p_c/p_n)^{1/\gamma}`$, flat in a layer at the adiabat, and the face density is that
+reconstruction carried to the face's pressure along the adiabat (`hydro/q.wgsl` `isen_inc`, on
+whole densities and pressures with a reference state too; the CPU reference of
+`src/reference/hydro.ts` does the same). It is a simpler relative of the local steady-state
+reconstruction of [Grosheintz-Laval & Käppeli (2020)][GrosheintzLaval2020], which reconstructs
+density, velocity and pressure about a cell's own steady adiabatic flow (constant entropy, mass
+flux and Bernoulli constant) and takes gravity's force from that flow; this one treats the
+density alone, at rest, and keeps the balanced pressure, and the face density is kept between
+the densities of the cell and its neighbor beyond the face.
+
+Where the gas is not on one smooth adiabat it does harm: across a shock, in a reaction zone, in
+cold gas falling at several times its sound speed, where the pressure (and so the density tied
+to it) is the least certain part of the state. Unchecked, it made a Sedov blast 1.70 cells out
+of round (1.10 with the plain density), drifted the Evrard collapse's energy 4.8% (0.23%) and
+slowed a detonation front by 1.2% of its Chapman-Jouguet speed (0.12%). So what it adds to the
+plain density's increment is bounded (`isen_blend`): by a quarter of the smaller density step
+to a neighbor, or, where the gas is smooth, by 1% of the density, which is far more than the
+correction there, about $`(\Delta x/H)^2`$ of the density. The gas is smooth where the
+pressure changes by less than 20% from cell to cell, the neighbors' densities at the cell's
+pressure lie within 1% of the cell's (the limiter's own measure of smoothness; a layer
+$`10^{-2}`$ off the adiabat, 50 cells per scale height deep, departs by $`10^{-4}`$ per cell)
+and the velocity changes by less than a tenth of the sound speed (gas falling onto a sink at
+Mach 3 changes by 0.2 to 0.3 per cell). Each of the three takes the room from 1% of the density
+down to nothing between its bound and twice it, continuously.
+
+It is bounded rather than switched off, or blended with the plain density by a weight, because
+both of those failed. A switch turns a difference of rounding into one of method in the cells
+where it flips: a Sedov blast in an octant differed from the whole box by
+$`1.5\times10^{-5}`$ in density, against $`2\times10^{-6}`$ with the plain density. A weight,
+however smooth, feeds back through the difference between the two reconstructions, which is
+largest at a shock: in a sink's converging flow, where the infall reaches Mach 3 at its
+accretion shock, the whole box's own mirror asymmetry grew to $`5\times10^{-3}`$ by step 64 with
+switches and $`7.5\times10^{-3}`$ with weights, against $`1.4\times10^{-6}`$ with the plain
+density (which grows too, slowly, there: $`3.8\times10^{-5}`$ by step 218). A bound acts only
+where it binds, and there its gain is that of the bound itself, at most 1% of the density over
+the guards' bounds: $`1.8\times10^{-4}`$ by step 218. At 5% of the density the converging flow
+was unstable again, or with the velocity guard the Sedov octant differed from the whole box by
+$`3.2\times10^{-5}`$; with no guards on the room, a detonation's reaction zone was left in part
+at a coarser level of an adaptive mesh; at half the density step, the Evrard collapse's energy
+drifted 0.63%.
+
+| | Plain density | Along the adiabat |
+|---|---|---|
+| Sedov blast, out of round | 1.10 cells | 1.07 |
+| Evrard collapse, energy drift | 0.23% | 0.31% |
+| Detonation front, speed error | 0.12% | 0.075% |
+| Sedov octant against the whole box | $`2\times10^{-6}`$ | $`2.5\times10^{-6}`$ |
+| Convecting layer at $`\delta = 10^{-6}`$, kinetic energy by $`t = 1000`$ | 14 times | 2.0 times |
+| At $`\delta = 10^{-4}`$, kinetic energy by $`t = 1000`$ | 1.7 times (it decays) | 10 times |
+
+(The layers are the *Convection* preset, 128 cells, with its reference state: at
+$`\delta = 10^{-4}`$ the plain density's own error in the buoyancy damps the convection, which
+the reconstruction along the adiabat keeps going. Before $`t = 700`$ the bounded reconstruction
+follows the unbounded one at $`\delta = 10^{-6}`$, which reaches 1.5 times by $`t = 1000`$.)
+Elsewhere the changes are small: the Rayleigh-Taylor layers' kinetic energy grows 47.54 times
+against 47.53, the Kelvin-Helmholtz layer's transverse kinetic energy 11.17 against 11.11, a
+polytrope's energy drifts 2.0% against 2.0%. A shearing sheet's epicycles keep their energy to
+$`6\times10^{-5}`$ either way. With a symmetric limiter the lower face of a cell first took
+the plain density and the upper face this one; both take it now. `physics.isentropicRecon`
+(link key `isen`) turns it off.
 
 ## 9. Equations of state
 
@@ -1826,7 +1877,7 @@ Without it, a rarefaction from the faces of the uniform collapse reached the cen
 $`t = 0.3`$, and in the Cartesian Noh implosion the gas coming in formed dense sheets along the
 axes that reached the shock. Such a zone also runs in spherical (r, θ) runs, which refuse the
 disk's and the tunnel's: it takes their positions and velocities as (r, θ) and
-$`(v_r, v_	heta, v_\phi)`$.
+$`(v_r, v_\theta, v_\phi)`$.
 
 **Turbulence driving** (`hydro/drive.ts`, `hydro/drive.wgsl`, `hydro/drive_ou.wgsl`; the
 driven-turbulence presets). A random acceleration stirs the gas at the largest scales: the
@@ -3951,6 +4002,7 @@ two levels of blocks (the test's threshold is 1e-4).
 [Brandt1977]: https://doi.org/10.1090/S0025-5718-1977-0431719-X
 [Bryan1995]: https://doi.org/10.1016/0010-4655(94)00191-4
 [Edelmann2021]: https://doi.org/10.1051/0004-6361/202140653
+[GrosheintzLaval2020]: https://doi.org/10.1016/j.jcp.2020.109805
 [Cada2009]: https://doi.org/10.1016/j.jcp.2009.02.020
 [Chandrasekhar1935]: https://doi.org/10.1093/mnras/95.3.207
 [Davis1988]: https://doi.org/10.1137/0909030
