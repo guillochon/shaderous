@@ -57,7 +57,7 @@ export const MCP_TOOLS: McpTool[] = [
       save_path: { type: 'string', description: 'Write the slice to this file: .npy (float32 for numpy), else JSON' },
     },
   },
-  { name: 'probe', method: 'probe', brief: 'Gives the gas at given points', pass: ['points'], required: ['points'] },
+  { name: 'probe', method: 'probe', brief: 'Gives the gas at given points, and with `reactions` the burning network’s reaction rates there', pass: ['points', 'reactions'], required: ['points'] },
   {
     name: 'profile', method: 'profile',
     brief: 'Samples any field the view can show along a line from `from` to `to` (or a line placed in the page, by `line`). Returns its length, min and max, with the values when there are at most 256; `save_path` writes them to a file: `.npy` (float32, shape `[n]`), `.csv` (distance, value, level), else JSON',

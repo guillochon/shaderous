@@ -104,8 +104,11 @@ export const API_METHODS: ApiMethod[] = [
   },
   {
     name: 'probe',
-    summary: 'The gas at points given as fractions of the box ([x, y, z], z ignored in 2D): density, pressure, velocity, passive scalar, temperature (temp in code units; tempK in kelvin, with physical units), refinement level and species mass fractions.',
-    args: [{ name: 'points', type: 'array', items: { type: 'array', items: { type: 'number' }, minItems: 3, maxItems: 3 }, minItems: 1 }],
+    summary: 'The gas at points given as fractions of the box ([x, y, z], z ignored in 2D): density, pressure, velocity, passive scalar, temperature (temp in code units; tempK in kelvin, with physical units), refinement level and species mass fractions. With `reactions`, in a run that burns with the network (aprox13), also the rate of each of its 16 reactions at each point: the reference’s rates at the point’s density, temperature and composition (the network’s inputs, not its step), each `{ label, fwd, rev, net, energy }`, rates in mol/g/s (net = fwd - rev) and energy the net reaction’s release in erg/g/s, with `burning` (false where the burn pass skips the cell, `burnNote` saying why).',
+    args: [
+      { name: 'points', type: 'array', items: { type: 'array', items: { type: 'number' }, minItems: 3, maxItems: 3 }, minItems: 1 },
+      { name: 'options', optional: true, type: 'object', properties: { reactions: { type: 'boolean', description: 'Also the network’s reaction rates at each point (a run that burns with the network)' } } },
+    ],
     changesRun: false,
   },
   {

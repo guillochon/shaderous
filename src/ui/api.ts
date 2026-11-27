@@ -19,13 +19,14 @@ import { hydrogenParticles, mixMoments, problemCoefficients } from '../species/m
 import { COMPOSITIONS, meanMolecularWeight } from '../units/composition';
 import { kelvinPerCodeT } from '../units/units';
 import { encodeArray } from '../io/arrays';
-import type { Diagnostics, SimConfig, Simulation } from '../sim';
+import { burnSpec, type Diagnostics, type SimConfig, type Simulation } from '../sim';
 import { EOS_LABELS, makeEos } from '../eos/eos';
 import { COOLING_LABELS } from '../cooling/cooling';
 import { FAMILIES, FIELDS, GRAVITY_MODES, LIMITER_KINDS, RIEMANN_KINDS } from '../problems';
 import { VIEW_EXTRAS, VIEW_MODES, VIEW_OPTIONS } from '../render/view_options';
 import { API_METHODS } from './api_schema';
 import { defaultFrameDt, problemUnits, type Prim } from '../problems/types';
+import { cellReactions } from './burn_graph';
 import type { ViewState } from '../render/renderer';
 import { COLORMAPS } from '../render/transfer';
 import { bigCanvas, composeBeside, overlayGutters, paintOverlays, type OverlayInfo, type OverlayOptions } from '../render/overlays';
@@ -1089,8 +1090,22 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
   }
 
   /** The primitive state, the temperature and the refinement level at points (fractions of the box). */
-  async function probePoints(points: Point[]) {
+  async function probePoints(points: Point[], opts?: { reactions?: boolean }) {
     const T = temperatureOf(app.cfg());
+    // The network's reactions at a point (ui/burn_graph.ts), as the readout's graph shows them.
+    const cfgNow = app.cfg();
+    const spec = burnSpec(cfgNow);
+    const net = { ...cfgNow.problem, units: problemUnits(cfgNow.problem, cfgNow.params) };
+    if (opts?.reactions && !cellReactions(spec, net, 1, 1, [])) throw new Error('probe: reactions need a run that burns with the network (physics.burn.network) and carries its species');
+    const withReactions = <P extends object>(q: P, rho: number, temp: number, X: readonly number[] | undefined): P => {
+      if (!opts?.reactions) return q;
+      const cell = cellReactions(spec, net, rho, temp, X ?? []);
+      if (!cell) return q;
+      return {
+        ...q, burning: cell.burning, ...(cell.why ? { burnNote: cell.why } : {}),
+        reactions: cell.edges.map((e) => ({ label: e.label, fwd: e.fwd, rev: e.rev, net: e.signed, energy: e.energy })),
+      };
+    };
     // A view that holds one field: the file's own cells.
     const fromFile = await app.viewProbe(points as number[][]);
     if (fromFile) {
@@ -1102,11 +1117,11 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
           const X = names.length && names.every((k) => k in v) ? names.map((k) => v[k]) : undefined;
           const w = { rho: v.rho, p: v.press, vx: v.vel1, vy: v.vel2, vz: v.vel3, s: v.r0 ?? 0, X };
           const temp = T.of(w);
-          return {
+          return withReactions({
             at: q.at, rho: w.rho, press: w.p, vel: [w.vx, w.vy, w.vz], r0: w.s, temp, ...(T.kelvin !== null ? { tempK: temp * T.kelvin } : {}),
             level: q.level, ...(X ? { X: Object.fromEntries(names.map((k, i) => [k, X[i]])) } : {}),
             ...(v.Bcc1 !== undefined ? { B: [v.Bcc1, v.Bcc2, v.Bcc3] } : {}),
-          };
+          }, w.rho, temp, X);
         }),
       };
     }
@@ -1116,10 +1131,10 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
       points: points.map((p) => {
         const w = sampler.prim(p[0], p[1], p[2], species);
         const temp = T.of(w);
-        return {
+        return withReactions({
           at: p, rho: w.rho, press: w.p, vel: [w.vx, w.vy, w.vz], r0: w.s, temp, ...(T.kelvin !== null ? { tempK: temp * T.kelvin } : {}),
           level: sampler.level(p[0], p[1], p[2]), ...(w.X ? { X: Object.fromEntries(species.map((k, i) => [k, w.X![i]])) } : {}),
-        };
+        }, w.rho, temp, w.X);
       }),
     };
   }
@@ -1524,7 +1539,7 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
      * The primitive state, the temperature (code units, and kelvin with physical units) and the
      * refinement level at points given in fractions of the box.
      */
-    probe: (points: Point[]) => serial(() => probePoints(points)),
+    probe: (points: Point[], opts?: { reactions?: boolean }) => serial(() => probePoints(points, opts)),
 
     /**
      * A field along a line through the box, from the GPU's own display code (the view's fields,

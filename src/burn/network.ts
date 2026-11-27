@@ -193,12 +193,8 @@ function screen5(T: number, rho: number, Y: number[], pair: ReturnType<typeof pa
 const scale = (v: number, [lo, hi]: readonly number[]): number => (2 * (v - lo)) / (hi - lo) - 1;
 const clamp = (v: number, lo: number, hi: number): number => Math.min(Math.max(v, lo), hi);
 
-/** The network's 61 inputs (train.features, 'full'), float64. */
-export function netFeatures(logRho: number, logT: number, logDt: number, Xin: readonly number[]): number[] {
-  const X = Xin.map((x) => Math.max(x, 0));
-  const f = [scale(logRho, NET_DATA.logRho), scale(logT, NET_DATA.logT), scale(logDt, NET_DATA.logDt)];
-  for (const x of X) f.push(x ** 0.25);
-  for (const x of X) f.push((clamp(Math.log10(x + 1e-30), -30, 0) + 15) / 15);
+/** ln of every term of the reference's dY/dt (NET_DATA.terms; mol/g/s), unclamped, float64. */
+function termLns(logRho: number, logT: number, X: readonly number[]): number[] {
   const T = 10 ** logT;
   const rho = 10 ** logRho;
   const T9 = clamp(T * 1e-9, 0.01, 10);
@@ -207,7 +203,7 @@ export function netFeatures(logRho: number, logT: number, logDt: number, Xin: re
   const lnY = Y.map((y) => Math.log(y + 1e-30));
   const scr: Record<string, number> = {};
   for (const k of Object.keys(PAIRS)) scr[k] = screen5(T, rho, Y, PAIRS[k]);
-  for (const term of NET_DATA.terms) {
+  return NET_DATA.terms.map((term) => {
     const r = term.rate as { sets: Sets | Record<string, Sets>; screen?: readonly string[]; approx?: string; alpha?: string; proton?: string };
     let lnLam: number;
     if (r.approx) {
@@ -224,9 +220,28 @@ export function netFeatures(logRho: number, logT: number, logDt: number, Xin: re
     }
     let ln = lnLam + Math.log(term.coef) + term.nrho * LN10 * logRho;
     for (const [i, n] of term.powers) ln += n * lnY[i];
-    f.push((clamp(ln / LN10, -30, 10) + 10) / 20);
-  }
+    return ln;
+  });
+}
+
+/** The network's 61 inputs (train.features, 'full'), float64. */
+export function netFeatures(logRho: number, logT: number, logDt: number, Xin: readonly number[]): number[] {
+  const X = Xin.map((x) => Math.max(x, 0));
+  const f = [scale(logRho, NET_DATA.logRho), scale(logT, NET_DATA.logT), scale(logDt, NET_DATA.logDt)];
+  for (const x of X) f.push(x ** 0.25);
+  for (const x of X) f.push((clamp(Math.log10(x + 1e-30), -30, 0) + 15) / 15);
+  for (const ln of termLns(logRho, logT, X)) f.push((clamp(ln / LN10, -30, 10) + 10) / 20);
   return f;
+}
+
+/**
+ * The rate r (mol/g/s) of every term of the reference's dY/dt at a density (g/cm^3), temperature
+ * (K) and 13 mass fractions, in NET_DATA.terms' order: each reaction's extent rate, forward and
+ * backward (what each does: aprox13_reactions.ts), as the network takes them in (unclamped), float64.
+ * A species the cell does not hold gives its reactions a rate of about 1e-30 per power, not 0.
+ */
+export function netReactionRates(logRho: number, logT: number, X: readonly number[]): number[] {
+  return termLns(logRho, logT, X.map((x) => Math.max(x, 0))).map((ln) => Math.exp(ln));
 }
 
 /** The network's outputs for inputs f, float64. */
@@ -308,17 +323,10 @@ function watchTerms(): { term: number; Q: number }[] {
   });
 }
 
-/** ln of each of the network's terms (mol/g/s) at a density, temperature and composition, float64. */
-function termLogs(logRho: number, logT: number, Xin: readonly number[]): number[] {
-  // The network's last 32 inputs are these, scaled: (clamp(ln / ln 10, -30, 10) + 10) / 20.
-  const f = netFeatures(logRho, logT, NET_DATA.logDt[0], Xin);
-  return f.slice(f.length - NET_DATA.terms.length).map((v) => (20 * v - 10) * LN10);
-}
-
 /** The energy (erg/g/s) the network's reactions release at a density (g/cm^3), temperature (K) and 13 mass fractions, from the eight a cell of he4, c12 and o16 runs, float64. */
 export function netEnergyRate(logRho: number, logT: number, X: readonly number[]): number {
-  const ln = termLogs(logRho, logT, X);
-  return 1e18 * watchTerms().reduce((e, { term, Q }) => e + Q * Math.exp(ln[term]), 0);
+  const r = netReactionRates(logRho, logT, X);
+  return 1e18 * watchTerms().reduce((e, { term, Q }) => e + Q * r[term], 0);
 }
 
 /**

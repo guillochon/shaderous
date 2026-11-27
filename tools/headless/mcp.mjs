@@ -133,7 +133,7 @@ const TOOLS = [
   },
   {
     name: 'probe',
-    run: async ({ points }) => text(await call('probe', points)),
+    run: async ({ points, reactions }) => text(await call('probe', points, reactions ? { reactions } : undefined)),
   },
   {
     name: 'profile',

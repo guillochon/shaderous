@@ -358,6 +358,29 @@ details[open] > summary .sum { display: none; }
 }
 #cell-pop[hidden] { display: none; }
 #cell-pop .title { font-size: 11px; color: var(--text); margin-bottom: 4px; white-space: nowrap; }
+#cell-pop .side { display: flex; flex-direction: column; gap: 8px; max-height: calc(100vh - 90px); overflow-y: auto; border-left: 1px solid var(--line); padding-left: 10px; }
+#cell-pop .side:not(:has(> :not([hidden]))) { display: none; }
+#cell-pop .burn-graph { width: 340px; font-size: 10px; color: var(--dim); }
+#cell-pop .burn-graph.collapsed svg, #cell-pop .burn-graph.collapsed .detail { display: none; }
+#cell-pop .burn-graph .chev { display: inline-block; width: 9px; transition: transform 0.12s; }
+#cell-pop .burn-graph:not(.collapsed) .chev { transform: rotate(90deg); }
+#cell-pop .burn-graph[hidden] { display: none; }
+#cell-pop .burn-graph .head { color: var(--text); font-size: 11px; display: flex; gap: 6px; align-items: baseline; cursor: pointer; user-select: none; }
+#cell-pop .burn-graph .caption { color: var(--dim); font-size: 10px; }
+#cell-pop .burn-graph svg { display: block; overflow: visible; width: 100%; height: auto; }
+#cell-pop .burn-graph svg.cold .edges, #cell-pop .burn-graph svg.cold .nodes { opacity: 0.45; }
+#cell-pop .burn-graph .stroke { stroke-linecap: round; }
+#cell-pop .burn-graph .stroke.eq { stroke-dasharray: 3 2.5; }
+#cell-pop .burn-graph .hit { fill: none; stroke: transparent; stroke-width: 9; }
+#cell-pop .burn-graph .rate { font: 8.5px ui-monospace, Consolas, monospace; font-variant-numeric: tabular-nums; }
+#cell-pop .burn-graph .edge.hl .stroke { filter: drop-shadow(0 0 1.5px var(--text)); }
+#cell-pop .burn-graph .edge.hl .rate { font-weight: 700; }
+#cell-pop .burn-graph .disc { fill: var(--accent); }
+#cell-pop .burn-graph .name { font-size: 8px; fill: var(--text); pointer-events: none; }
+#cell-pop .burn-graph .node.absent { opacity: 0.35; }
+#cell-pop .burn-graph .node.hl .disc { stroke: var(--text); }
+#cell-pop .burn-graph .mark { stroke: var(--panel); stroke-width: 1; }
+#cell-pop .burn-graph .detail { min-height: 2.8em; line-height: 1.4; margin-top: 2px; }
 #cell-pop .body { display: flex; align-items: flex-start; gap: 10px; }
 #cell-pop dl { width: 274px; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 1px 10px; margin: 0; font-size: 11px; }
 /* Pinned: a sparkline beside each number, of its readings since the pin. */
@@ -371,7 +394,7 @@ details[open] > summary .sum { display: none; }
 /* The pinned cell's equations, each term colored by its size there (ui/terms.ts). */
 /* The pinned cell's equations, each term colored by its size there (ui/terms.ts); hovering
    one opens its breakdown, a click keeps it open. */
-#cell-pop .eqs { width: 340px; max-height: calc(100vh - 90px); overflow-y: auto; border-left: 1px solid var(--line); padding-left: 10px; font-size: 11px; color: var(--dim); }
+#cell-pop .eqs { width: 340px; font-size: 11px; color: var(--dim); }
 #cell-pop .eqs[hidden] { display: none; }
 #cell-pop .eqs .head { color: var(--text); display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px; }
 #cell-pop .eqs .legend { font-size: 10px; color: var(--dim); display: flex; align-items: center; gap: 4px; }

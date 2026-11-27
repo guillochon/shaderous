@@ -30,6 +30,7 @@ import { speciesLabel } from '../species/species';
 import { mixMoments, problemCoefficients, speciesNuclides } from '../species/mixture';
 import { burnRates } from './burn_rates';
 import { ReadoutView, type Row } from './readout_view';
+import { BurnGraphView, cellReactions } from './burn_graph';
 import { hubble } from '../cosmo';
 import { amrFits, createSim, fieldShaderFor, gridBytes, maxAmrLevels, minAmrLevels, supportsAmr } from '../create';
 import { laneEmdenCached, polytropeMass } from '../problems/lane_emden';
@@ -4475,7 +4476,8 @@ async function runQuery() {
     // A source, sink or point mass under the pointer is shown with the gas where it is.
     const thing = thingAt(px, py);
     const f = thing ? thingPos(thing) : await boxPointAt(px, py);
-    const c = f ? await probeAt(s, f) : null;
+    // The network's graph needs the cell's species, which come with its stencil.
+    const c = f ? await probeAt(s, f, netGraphShown()) : null;
     if (s !== sim || !queryPoint || tool !== 'query' || pin) return;
     if (!c && !thing) cellPop.hidden = true;
     else showQuery(thing, c, queryPoint.x, queryPoint.y);
@@ -4636,6 +4638,7 @@ function showQuery(thing: Thing | null, c: CellProbe | null, x: number, y: numbe
   queryView.setRows(rows, pinned);
   if (pinned && c?.stencil) setEquations(c);
   else queryView.setEquations(null);
+  showNetGraph(c);
   // A new reading of the pinned cell: add it to the series.
   if (pinned && c && c !== recorded) {
     recorded = c;
@@ -4662,6 +4665,47 @@ const queryPop = $('diag-pop');
 const queryView = new ReadoutView(cellPop.querySelector('dl')!, cellPop.querySelector('.eqs')!, { el: queryPop, title: queryPop.querySelector('.title')!, canvas: queryPop.querySelector('canvas')! }, cellPop);
 /** The reading of the pinned cell last added to the series. */
 let recorded: CellProbe | null = null;
+
+// --- the burning network's graph -----------------------------------------------------------
+// A run that burns with the network (or watches for it) shows its reactions at the cell read, as
+// a graph under the readout's equations (ui/burn_graph.ts). It starts collapsed to its header;
+// whether it is open is kept per viewer.
+let netGraphOpen = false;
+try {
+  netGraphOpen = localStorage.getItem('shaderous.netgraph') === 'open';
+} catch {
+  /* storage unavailable: collapsed */
+}
+const netGraph = new BurnGraphView(cellPop.querySelector('.burn-graph')!, netGraphOpen, (open) => {
+  netGraphOpen = open;
+  try {
+    localStorage.setItem('shaderous.netgraph', open ? 'open' : 'closed');
+  } catch {
+    /* kept for this page only */
+  }
+});
+queryView.recordAlso(() => netGraph.series());
+queryView.popsOver(cellPop.querySelector('.burn-graph')!);
+
+/** The run burns with the network and carries its species (all thirteen, or the watched three). */
+function netGraphRun(): boolean {
+  const spec = cfg ? burnSpec(cfg) : null;
+  return !!spec && 'network' in spec && !!cellReactions(spec, { ...cfg.problem, units: problemUnits(cfg.problem, cfg.params) }, 1, 1, []);
+}
+/** A hover's read takes the cell's species (its stencil) only for an open graph; a pinned read always has them. */
+const netGraphShown = () => netGraphOpen && netGraphRun();
+
+/** The graph of the network's reactions at the cell read (none: hidden). */
+function showNetGraph(c: CellProbe | null) {
+  const rx = c?.stencil?.species?.[13];
+  const rho = c?.u1[0] ?? 0;
+  if (!netGraphRun() || !c || !rx || !(rho > 0)) return netGraph.update(null);
+  const X = rx.map((v) => v / rho);
+  const T = cellEos(c).eos.temperature(rho, c.u2[1]);
+  const cell = cellReactions(burnSpec(cfg), { ...cfg.problem, units: problemUnits(cfg.problem, cfg.params) }, rho, T, X);
+  if (!cell) return netGraph.update(null);
+  netGraph.update({ cell, network: runBurnRates()?.(rho, T, X) ?? null });
+}
 $('cell-export').addEventListener('click', () => {
   const url = URL.createObjectURL(new Blob([queryView.log.csv()], { type: 'text/csv' }));
   const a = document.createElement('a');

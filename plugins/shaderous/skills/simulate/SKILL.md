@@ -196,7 +196,7 @@ Typical sequence: `describe` → `load {setup}` → `run {until}` → `diagnosti
 | `diagnostics` | Reads back totals and extremes: mass, momentum, energies, Mach number, point masses, field ranges |
 | `stats` | Gives each variable’s min, max and volume-weighted mean over the box |
 | `slice` | Samples a variable on a plane. Returns min, max and mean, with the values as rows when `res` is at most 64; `save_path` writes the full slice to a file instead: a `.npy` file (float32, shape `[res, res]`) if the name ends in `.npy`, else JSON |
-| `probe` | Gives the gas at given points |
+| `probe` | Gives the gas at given points, and with `reactions` the burning network’s reaction rates there |
 | `profile` | Samples any field the view can show along a line from `from` to `to` (or a line placed in the page, by `line`). Returns its length, min and max, with the values when there are at most 256; `save_path` writes them to a file: `.npy` (float32, shape `[n]`), `.csv` (distance, value, level), else JSON |
 | `screenshot` | Returns a PNG image of the view, optionally changing the `view` first and saving to `save_path` |
 | `view` | Changes what screenshots show, leaving the run alone |

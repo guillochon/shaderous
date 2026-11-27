@@ -134,7 +134,9 @@ export class ReadoutView {
   private blocks: Block[] = [];
   /** The series whose whole run the popup shows, and the element it is beside. */
   private popKey: string | null = null;
-  private popAnchor: HTMLElement | null = null;
+  private popAnchor: Element | null = null;
+  /** Series recorded besides the rows and equations (the network's graph: ui/burn_graph.ts). */
+  private extra: () => Map<string, { label: string; raw: number[]; scale: number; unit: string }> = () => new Map();
 
   constructor(
     private dl: HTMLElement,
@@ -178,16 +180,24 @@ export class ReadoutView {
       if (block && !block.contains(e.relatedTarget as Node)) delete block.dataset.drawn;
     });
     // A sparkline hovered: its whole series beside the readout.
-    for (const root of [dl, eqs]) {
-      root.addEventListener('pointerover', (e) => {
-        const s = (e.target as Element).closest('[data-s]') as HTMLElement | null;
-        if (s) this.showPop(s.dataset.s!, s);
-      });
-      root.addEventListener('pointerout', (e) => {
-        const s = (e.target as Element).closest('[data-s]');
-        if (s && !s.contains(e.relatedTarget as Node)) this.hidePop();
-      });
-    }
+    for (const root of [dl, eqs]) this.popsOver(root);
+  }
+
+  /** Hovering an element under `root` with a data-s (a series key) shows that series' popup. */
+  popsOver(root: Element) {
+    root.addEventListener('pointerover', (e) => {
+      const s = (e.target as Element).closest('[data-s]');
+      if (s) this.showPop(s.getAttribute('data-s')!, s);
+    });
+    root.addEventListener('pointerout', (e) => {
+      const s = (e as PointerEvent).target instanceof Element ? ((e as PointerEvent).target as Element).closest('[data-s]') : null;
+      if (s && !s.contains((e as PointerEvent).relatedTarget as Node)) this.hidePop();
+    });
+  }
+
+  /** Record these series too, with every reading (each a key, its label, its values, display scale and unit). */
+  recordAlso(series: () => Map<string, { label: string; raw: number[]; scale: number; unit: string }>) {
+    this.extra = series;
   }
 
   /** Start the series again (a new pin), and close the breakdowns. */
@@ -261,6 +271,7 @@ export class ReadoutView {
     this.log.tUnit = tUnit;
     const values = new Map<string, { label: string; raw: number[]; scale: number; unit: string }>();
     for (const r of this.rows) if (r.series) values.set(`row:${r.key}`, { label: r.name ?? r.label, ...r.series });
+    for (const [k, v] of this.extra()) values.set(k, v);
     for (const b of this.blocks) {
       for (const l of b.lines) {
         values.set(l.key, { label: `${b.name}: ${l.label}`, raw: [l.largest > 0 ? (100 * l.size) / l.largest : 0], scale: 1, unit: '%' });
@@ -284,7 +295,7 @@ export class ReadoutView {
     });
   }
 
-  private showPop(key: string, anchor: HTMLElement) {
+  private showPop(key: string, anchor: Element) {
     const s = this.log.series(key);
     if (!s || !varies(s[1])) return;
     this.popKey = key;
