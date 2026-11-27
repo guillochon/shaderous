@@ -36,7 +36,11 @@ export const LIMITERS: Record<RefConfig['limiter'], Limiter> = {
     const free = (far + 2 * near) / 3;
     const lim = far * near > 0 ? Math.sign(near) * Math.min(2 * Math.abs(far), 2 * Math.abs(near), Math.abs(free)) : 0;
     const s = KOREN_SMOOTH * scale;
-    const w = Math.min(Math.max(1.5 - (far * far + near * near) / Math.max(s * s, 1e-30), 0), 1);
+    // As hydro/limiters/koren.wgsl: the measure as it is where s^2 is a comfortable single-precision
+    // number (or s is 0), from the differences over s elsewhere.
+    const asIs = (s * s >= 1e-30 && s * s < 1e30) || s === 0;
+    const eta = asIs ? (far * far + near * near) / Math.max(s * s, 1e-30) : (far / Math.abs(s)) ** 2 + (near / Math.abs(s)) ** 2;
+    const w = Math.min(Math.max(1.5 - eta, 0), 1);
     return lim + (free - lim) * w;
   },
 };

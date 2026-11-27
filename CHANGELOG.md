@@ -235,6 +235,12 @@ What changed in each release of Shaderous. A release's section here is the body 
   cell's density; read as a fall, it put every cell at first order, which drops the balanced
   pressure increments, and the column, at rest within 10⁻⁵ of the sound speed before, rose at
   Mach 5 in a sound crossing (now 1.5×10⁻⁶).
+- The third-order reconstruction judges smoothness at any scale. Its test squared 1% of the
+  density (or pressure) and floored that at 10⁻³⁰, so every difference below about 7×10⁻¹⁶ counted
+  as smooth and was left unlimited, however steep, and above a scale of 2×10¹⁹ the square
+  overflowed to the same effect. Gas thinner than about 10⁻¹⁶ in code units fell to first order
+  at its first step: a column at rest stirred itself up to Mach 0.24 wherever it crossed that
+  density. Where the square is an ordinary single-precision number the arithmetic is as before.
 - HLLC and its low-Mach version take the HLL flux where gas too cold for its wave speeds gave
   0 / 0 (every flux NaN), and HLLD takes HLLE where the contact speed rounds onto a fast wave.
 - The Helmholtz equation of state starts Newton's iteration for thin hot gas from the ideal gas
