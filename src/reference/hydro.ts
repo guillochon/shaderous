@@ -290,6 +290,8 @@ export class RefHydro {
     // Face-to-face difference across the cell, which drives the half-step evolution.
     const s = su.map((u, d) => u.map((x, v) => 0.5 * (x + sd[d][v])));
     const big = (v: number) => Math.max(...su.map((u) => Math.abs(u[v])), ...sd.map((u) => Math.abs(u[v])));
+    // The density's largest fall from the cell to a face, signed face by face (hydro/predictor.wgsl).
+    const fall = Math.min(0, ...su.map((u) => 0.5 * u[0]), ...sd.map((u) => -0.5 * u[0]));
     const conv = nb[0][1][1] - nb[0][0][1] + (nb[1][1][2] - nb[1][0][2]) + (nb[2][1][3] - nb[2][0][3]);
     const jump = Math.max(...nb.map(([m, p]) => Math.abs(p[4] - m[4]) / Math.min(p[4], m[4])));
     const flag = conv < 0 && jump > c.shockThresh ? 1 : 0;
@@ -306,7 +308,7 @@ export class RefHydro {
     qh[4] = q[4] - h * (adv(4) + rho * cs * cs * dv);
     qh[5] = q[5] - h * adv(5);
 
-    const rmin = qh[0] - 0.5 * big(0);
+    const rmin = qh[0] + fall;
     const pmin = qh[4] - 0.5 * big(4);
     if (!(rmin > 0 && pmin > 0)) {
       const zero = () => [0, 1, 2].map(() => new Float64Array(NQ));
