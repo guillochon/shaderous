@@ -1930,7 +1930,14 @@ than 10 ms is split into network steps.
 - **Reference network.** `burner.py` integrates aprox13 (the network module is generated with
   pynucastro, [Smith Clark et al. 2023][Smith2023], from REACLIB rates with pynucastro's
   screening) at constant density with self-heating, the temperature following from the
-  tabulated electron-positron equation of state as in the simulator.
+  tabulated electron-positron equation of state as in the simulator. The shipped network was
+  trained on a first reference that kept only the alpha exits of C12 + C12, C12 + O16 and
+  O16 + O16 (55%, about 40% and 21% of their totals) and dropped the proton exits with the
+  protons. Against aprox13 it burns carbon 1.8 times and oxygen 3 to 4 times more slowly, so
+  half the carbon takes 1.8 times longer to burn and half the oxygen 1.8 to 2.8 times longer
+  (as Doron Kushnir pointed out). `build_net.py` now builds pynucastro's aprox13, which folds
+  each proton exit through Na23, Al27 or P31, for the next training. The inputs stay the rate
+  terms of the first reference (`aprox13_features.py`).
 - **Network.** Inputs: $`\log\rho`$, $`\log T`$, $`\log\Delta t`$, the mass fractions, and the
   logarithm of every screened rate term of the reference (61 in all). The rate terms are inputs
   because they rise with temperature far more steeply than a network this size could resolve

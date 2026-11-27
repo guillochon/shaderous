@@ -10,8 +10,8 @@
 # (gpu.minCudaVersion "12.8" on the pod).
 #
 # Everything a training run needs except its data is baked in: torch, pynucastro, Numba and
-# SciPy for the reference burner, the code, the generated network (aprox13.py, from
-# build_net.py), the shipped surrogate (a teacher for distillation), and the equation of
+# SciPy for the reference burner, the code, the generated networks (aprox13.py and
+# aprox13_features.py, from build_net.py), the shipped surrogate (a teacher for distillation), and the equation of
 # state's table with its Python reader (tools/eos/helm.py and the lookup it shares,
 # tools/eos/table.py), kept at the repository's own
 # relative paths so that the code finds them as it does in a checkout.

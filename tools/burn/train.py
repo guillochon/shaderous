@@ -71,7 +71,7 @@ def scale(v, lo_hi):
 # each stage of the alpha chain. Their rates rise as exp(-tau / T^(1/3)), far more steeply
 # than a small network resolves from log T to the few percent an ignition delay needs.
 RATE_INPUTS = [
-    # function in aprox13.py, reactant indices (he4 0, c12 1, o16 2, ne20 3, si28 5)
+    # function in aprox13_features.py, reactant indices (he4 0, c12 1, o16 2, ne20 3, si28 5)
     ("C12_C12_to_He4_Ne20_reaclib", (1, 1)),
     ("O16_C12_to_He4_Mg24_reaclib", (2, 1)),
     ("O16_O16_to_He4_Si28_reaclib", (2, 2)),
@@ -86,9 +86,10 @@ RATE_INPUTS = [
 def reaclib_sets(name):
     """The REACLIB fit sets of one rate, as rows (a0..a6) of
     ln rate = a0 + a1/T9 + a2 T9^(-1/3) + a3 T9^(1/3) + a4 T9 + a5 T9^(5/3) + a6 ln T9,
-    read out of the generated network."""
+    read out of the network the inputs come from (aprox13_features.py, from build_net.py: the
+    first reference, so that the inputs stay those of the shipped network)."""
     import re
-    src = (HERE / "aprox13.py").read_text()
+    src = (HERE / "aprox13_features.py").read_text()
     body = src[src.index(f"def {name}("):]
     body = body[:body.index("rate_eval.")]
     terms = {"T9i": 1, "T913i": 2, "T913": 3, "T9": 4, "T953": 5, "lnT9": 6}
