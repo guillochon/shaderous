@@ -365,7 +365,7 @@ details[open] > summary .sum { display: none; }
 #cell-pop .burn-graph .chev { display: inline-block; width: 9px; transition: transform 0.12s; }
 #cell-pop .burn-graph:not(.collapsed) .chev { transform: rotate(90deg); }
 #cell-pop .burn-graph[hidden] { display: none; }
-#cell-pop .burn-graph .head { color: var(--text); font-size: 11px; display: flex; gap: 6px; align-items: baseline; cursor: pointer; user-select: none; }
+#cell-pop .burn-graph > .head { color: var(--text); font-size: 11px; display: flex; gap: 6px; align-items: baseline; cursor: pointer; user-select: none; }
 #cell-pop .burn-graph .caption { color: var(--dim); font-size: 10px; }
 #cell-pop .burn-graph svg { display: block; overflow: visible; width: 100%; height: auto; }
 #cell-pop .burn-graph svg.cold .edges, #cell-pop .burn-graph svg.cold .nodes { opacity: 0.45; }
@@ -414,6 +414,31 @@ details[open] > summary .sum { display: none; }
 #cell-pop .eqs .net { font-style: italic; margin-top: 1px; }
 #cell-pop .eqs .net:empty { display: none; }
 #cell-pop .eqs .note { margin-top: 4px; }
+#cell-pop .vals-head, #cell-pop .eqs .chev { display: none; }
+/* Phones: a sheet across the bottom, above the controls' bar, with its sections one above
+   another and each folded to its header until it is tapped (ui/app.ts). */
+@media (max-width: 700px) {
+  #cell-pop {
+    left: 0 !important; right: 0; top: auto !important; bottom: calc(var(--bar) + var(--safe)); width: auto;
+    max-height: 60dvh; overflow-y: auto; overscroll-behavior: contain; box-sizing: border-box; border-radius: 8px 8px 0 0;
+  }
+  #cell-pop .title { white-space: normal; position: sticky; top: -6px; z-index: 1; margin: -6px -8px 0; padding: 6px 8px 4px; background: var(--panel); }
+  #cell-pop .body { flex-direction: column; align-items: stretch; gap: 6px; }
+  #cell-pop .side { max-height: none; overflow: visible; border-left: 0; padding-left: 0; gap: 6px; }
+  #cell-pop dl, #cell-pop dl.sparks, #cell-pop .eqs, #cell-pop .burn-graph { width: auto; }
+  #cell-pop .burn-graph svg { max-width: 420px; }
+  #cell-pop .fold-head, #cell-pop .burn-graph > .head {
+    display: flex; align-items: center; gap: 6px; min-height: 28px;
+    color: var(--text); font-size: 12px; cursor: pointer; user-select: none; border-top: 1px solid var(--line);
+  }
+  #cell-pop .eqs .head { justify-content: flex-start; margin-bottom: 0; }
+  #cell-pop .eqs .legend { margin-left: auto; }
+  #cell-pop .chev, #cell-pop .eqs .chev { display: inline-block; width: 9px; transition: transform 0.12s; }
+  #cell-pop.open-values .vals-head .chev, #cell-pop.open-eqs .eqs .chev { transform: rotate(90deg); }
+  #cell-pop:not(.open-values) dl { display: none; }
+  #cell-pop:not(.open-eqs) .eqs:has(> .head) > :not(.head) { display: none; }
+  #cell-pop .burn-graph .caption { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+}
 #cell-pop .pin-actions { display: none; gap: 6px; justify-content: flex-end; margin-top: 6px; }
 #cell-pop.pinned { pointer-events: auto; }
 #cell-pop.pinned .pin-actions { display: flex; }

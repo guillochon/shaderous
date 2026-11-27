@@ -4670,14 +4670,16 @@ let recorded: CellProbe | null = null;
 // A run that burns with the network (or watches for it) shows its reactions at the cell read, as
 // a graph under the readout's equations (ui/burn_graph.ts). It starts collapsed to its header;
 // whether it is open is kept per viewer.
+// On a phone it starts collapsed every time, as the readout's other sections do there.
 let netGraphOpen = false;
 try {
-  netGraphOpen = localStorage.getItem('shaderous.netgraph') === 'open';
+  netGraphOpen = !phone.matches && localStorage.getItem('shaderous.netgraph') === 'open';
 } catch {
   /* storage unavailable: collapsed */
 }
 const netGraph = new BurnGraphView(cellPop.querySelector('.burn-graph')!, netGraphOpen, (open) => {
   netGraphOpen = open;
+  if (phone.matches) return;
   try {
     localStorage.setItem('shaderous.netgraph', open ? 'open' : 'closed');
   } catch {
@@ -4685,6 +4687,13 @@ const netGraph = new BurnGraphView(cellPop.querySelector('.burn-graph')!, netGra
   }
 });
 queryView.recordAlso(() => netGraph.series());
+// On a phone the readout is a sheet along the bottom, its sections one above another, each
+// folded to its header until it is tapped (style.css): the values and the equations here, the
+// network in its own view. Elsewhere the headers do nothing.
+cellPop.addEventListener('click', (e) => {
+  const head = (e.target as Element).closest<HTMLElement>('.fold-head');
+  if (head && phone.matches) cellPop.classList.toggle(`open-${head.dataset.fold}`);
+});
 queryView.popsOver(cellPop.querySelector('.burn-graph')!);
 
 /** The run burns with the network and carries its species (all thirteen, or the watched three). */

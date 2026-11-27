@@ -235,7 +235,7 @@ export class ReadoutView {
     if (shape !== this.eqShape) {
       this.eqShape = shape;
       // A header with the ramp the terms are colored on.
-      const head = this.blocks.length ? '<div class="head">Equations <span class="legend">term size, of the largest: <span class="ramp"></span></span></div>' : '';
+      const head = this.blocks.length ? '<div class="head fold-head" data-fold="eqs"><span class="chev">▸</span>Equations <span class="legend">term size, of the largest: <span class="ramp"></span></span></div>' : '';
       this.eqs.innerHTML =
         head +
         this.blocks
