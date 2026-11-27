@@ -168,6 +168,10 @@ details[open] > summary .sum { display: none; }
 #tools { display: flex; flex-direction: column; gap: 4px; }
 #tools button { height: 26px; padding: 0; display: grid; place-items: center; color: var(--dim); background: rgba(29, 35, 48, 0.85); }
 #tools button svg { width: 16px; height: 16px; display: block; }
+#tools button { position: relative; }
+#tools .hotkey { position: absolute; right: 2px; bottom: 1px; font: 8px/1 ui-monospace, monospace; color: var(--dim); opacity: 0; transition: opacity 0.12s; pointer-events: none; }
+#tools button:hover .hotkey, #tools button:focus-visible .hotkey { opacity: 1; }
+#tools button[aria-pressed='true'] .hotkey { color: #aab3c5; }
 #tools button:hover { color: var(--text); }
 #tools button[aria-pressed='true'] { border-color: var(--accent); background: #223049; color: #fff; }
 #tools button:disabled { opacity: 0.4; cursor: default; border-color: var(--line); }

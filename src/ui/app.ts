@@ -195,7 +195,7 @@ side.innerHTML = `
     <div id="timing"></div>
   </details>
 
-  <footer><a href="validate.html" title="Run the test problems and compare them with exact solutions">Validation suite</a> &middot; <a href="https://github.com/guillochon/shaderous" target="_blank" rel="noopener" title="The code of this simulator">Source on GitHub</a> &middot; <a href="https://hub.valency.io/works/W_e4sja6m3" target="_blank" rel="noopener" title="The paper that describes this simulator">Paper on Valency</a><br>drag to orbit (pan in a slice), wheel or pinch to zoom, double-click to reset a slice, space to play or pause<br>with an editing tool picked, drag edits the gas and right-drag moves the view, ↑ ↓ move its ball in depth (Shift: 10&times;, Home: back); Esc puts the tool away<br><span title="Build of the page you are looking at">build ${BUILD}</span></footer>
+  <footer><a href="validate.html" title="Run the test problems and compare them with exact solutions">Validation suite</a> &middot; <a href="https://github.com/guillochon/shaderous" target="_blank" rel="noopener" title="The code of this simulator">Source on GitHub</a> &middot; <a href="https://hub.valency.io/works/W_e4sja6m3" target="_blank" rel="noopener" title="The paper that describes this simulator">Paper on Valency</a><br>drag to orbit (pan in a slice), wheel or pinch to zoom, double-click to reset a slice, space to play or pause<br>with an editing tool picked, drag edits the gas and right-drag moves the view, ↑ ↓ move its ball in depth (Shift: 10&times;, Home: back); Esc puts the tool away; each tool's key (shown on hover) picks it up or puts it away<br><span title="Build of the page you are looking at">build ${BUILD}</span></footer>
 `;
 
 // On a phone the rail lies over the simulation, so it can be put away (remembered in this
@@ -453,6 +453,13 @@ TOOLS.push({
   title: 'Profile: press where a line starts and drag to where it ends (or click at each end) to plot a field along it. Shift keeps the line at 15° steps. In the volume view the line lies on the plane facing you through the point orbited; Alt puts an end on the gas seen under the pointer instead. Drag an end to move it; Esc lets a line being placed go',
   icon: icon('<path d="M1.5 14.5h13M1.5 14.5V1.5" /><path d="M3.5 11l3-4 2.5 2.5 4-6" />'),
 });
+/** Each tool's key on the keyboard: it picks the tool up, or puts it away, as a click does. */
+const TOOL_KEYS: Record<ToolKind, string> = {
+  mass: 'm', velocity: 'v', temperature: 't', obstacle: 'o', field: 'b', pull: 'g',
+  source: 's', sink: 'k', star: 'r', query: 'q', profile: 'p',
+};
+/** A tool's description, with its key. */
+const toolTitle = (t: (typeof TOOLS)[number]) => `${t.title} (${TOOL_KEYS[t.kind].toUpperCase()})`;
 /**
  * The point masses the tools have placed in this run, in the order they were added: the last
  * of the run's masses (the simulation holds MAX_MASSES in all). A sink is one; a source that
@@ -576,7 +583,7 @@ let massAtRest = true;
 const slider = (id: string, label: string, title: string, min: number, max: number) =>
   `<label class="scrub" id="tp-${id}-row" title="${title}"><input id="tp-${id}" type="range" min="${min}" max="${max}" step="0.01" aria-label="${title}" /><span>${label}<output id="tp-${id}-out"></output></span></label>`;
 $('tools').innerHTML =
-  TOOLS.map((t) => `<button id="tool-${t.kind}" aria-pressed="false" aria-label="${t.label}" title="${t.title}">${t.icon}</button>`).join('') +
+  TOOLS.map((t) => `<button id="tool-${t.kind}" aria-pressed="false" aria-label="${t.label}" title="${toolTitle(t)}">${t.icon}<kbd class="hotkey" aria-hidden="true">${TOOL_KEYS[t.kind].toUpperCase()}</kbd></button>`).join('') +
   `<div id="tool-params" class="tool-params"><div class="tool-params-in">
     ${slider('size', 'Size', 'Brush radius, as a share of the box', 0.01, 0.3)}
     ${slider('softness', 'Soft', 'Softness of the edge: 0 is hard, 1 fades all the way from the center', 0, 1)}
@@ -617,7 +624,7 @@ function syncTools() {
     b.hidden = (noField && FIELD_TOOLS.includes(t.kind)) || (t.kind === 'star' && !!noStar);
     b.setAttribute('aria-pressed', String(tool === t.kind));
     b.disabled = (t.kind === 'temperature' && noTemp) || (t.kind === 'star' && !!noStar) || (t.kind === 'obstacle' && !!noObstacle) || (t.kind === 'profile' && !!noProfile);
-    b.title = !b.disabled ? t.title : t.kind === 'star' ? noStar : t.kind === 'obstacle' ? noObstacle : t.kind === 'profile' ? noProfile : 'This equation of state ties the temperature to the density';
+    b.title = !b.disabled ? toolTitle(t) : t.kind === 'star' ? noStar : t.kind === 'obstacle' ? noObstacle : t.kind === 'profile' ? noProfile : 'This equation of state ties the temperature to the density';
   }
   canvas.classList.toggle('tool', tool !== null);
   // The tool's settings slide out under its own button, pushing the buttons below it down.
@@ -890,6 +897,22 @@ for (const t of TOOLS) {
     syncTools();
   });
 }
+// The tools' keys. Not with Ctrl, Cmd or Alt (the browser's shortcuts), nor Shift (held while
+// drawing), nor where a key means something already: a field, a menu, the setup dialog.
+window.addEventListener('keydown', (e) => {
+  if (e.repeat || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey || e.isComposing) return;
+  const t = e.target as HTMLElement | null;
+  if (t && (t.closest('input, select, textarea, [contenteditable], dialog') || t.isContentEditable)) return;
+  if (document.querySelector('dialog[open]')) return;
+  const hit = TOOLS.find((x) => TOOL_KEYS[x.kind] === e.key.toLowerCase());
+  if (!hit) return;
+  const b = $<HTMLButtonElement>(`tool-${hit.kind}`);
+  if (b.hidden || b.disabled) return;
+  e.preventDefault();
+  // On a phone the rail may be put away: brought back, so the tool picked is on screen.
+  if (tool !== hit.kind && $('rail').classList.contains('closed')) $('rail-toggle').click();
+  b.click();
+});
 for (const sh of SHAPES) {
   $(`shape-${sh.mode}`).addEventListener('click', () => {
     shapeMode = sh.mode;
