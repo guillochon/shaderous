@@ -5,12 +5,19 @@
 //
 // Both are confined to the star by a taper, (p - p_cut) / (p_c - p_cut) where positive, or its
 // square root (the field then follows sqrt(p), and its plasma beta is about the same throughout),
-// from the star's own pressure profile (the preset's, not the settled one: any A gives a divergence-free
+// from the star's own pressure profile (in a binary's Roche potential, its pressure as it will
+// settle there, StarProfile.pressureAt) (the preset's, not the settled one: any A gives a divergence-free
 // field, and at the plasma betas these are meant for the field does not change the balance).
 
 /** A star's pressure at radius r from its center (code units), and the cut below which there is no field. */
 export interface StarProfile {
   pressure: (r: number) => number;
+  /**
+   * The pressure at a point (x, y, z) from the center, where the star is not round: one settled
+   * in a binary's Roche potential (setup/parts/bodies.ts rochePressure). The dipole's and the
+   * random field's taper follow it when it is given; `pressure` still sets their scale.
+   */
+  pressureAt?: (x: number, y: number, z: number) => number;
   /** the pressure at the center */
   pc: number;
   /** below this pressure the field is zero */
@@ -21,9 +28,10 @@ export interface StarProfile {
 
 type Potential = (x: number, y: number, z: number) => [number, number, number];
 
-/** The taper at radius r: ((p - p_cut) / (p_c - p_cut))^exponent where positive, else 0. */
-const taperAt = (star: StarProfile, exponent: number, r: number): number => {
-  const f = Math.max(star.pressure(r) - star.pcut, 0) / (star.pc - star.pcut);
+/** The taper at (x, y, z) from the center: ((p - p_cut) / (p_c - p_cut))^exponent where positive, else 0. */
+const taperAt = (star: StarProfile, exponent: number, x: number, y: number, z: number): number => {
+  const p = star.pressureAt ? star.pressureAt(x, y, z) : star.pressure(Math.hypot(x, y, z));
+  const f = Math.max(p - star.pcut, 0) / (star.pc - star.pcut);
   return exponent === 1 ? f : f ** exponent;
 };
 
@@ -34,7 +42,7 @@ const taperAt = (star: StarProfile, exponent: number, r: number): number => {
 export function dipoleField(star: StarProfile, beta: number, exponent = 1): Potential {
   const a0 = Math.sqrt((2 * star.pc) / beta) / 2;
   return (x, y, z) => {
-    const f = taperAt(star, exponent, Math.hypot(x, y, z));
+    const f = taperAt(star, exponent, x, y, z);
     return [-a0 * f * y, a0 * f * x, 0];
   };
 }
@@ -79,7 +87,7 @@ export function randomField(star: StarProfile, beta: number, seed = 1, exponent 
     ms.push({ k: n.map((c) => c * kk), a: u.map((c) => (amp * c) / ul), phase: 2 * Math.PI * rnd() });
   }
   const raw: Potential = (x, y, z) => {
-    const f = taperAt(star, exponent, Math.hypot(x, y, z));
+    const f = taperAt(star, exponent, x, y, z);
     if (f === 0) return [0, 0, 0];
     let ax = 0;
     let ay = 0;

@@ -68,6 +68,12 @@ What changed in each release of Shaderous. A release's section here is the body 
   field's edge. With the pressure (as before, and still the default), the beta of a white dwarf's
   outer layers is thousands of times the central one, and gas pulled off the surface carries
   almost no field.
+- **The field inside a star in a binary fills the star as it settles.** A star settled in the
+  binary's Roche potential is stretched toward L1, past where its round profile has pressure,
+  and the dipole's and the random field's taper stopped at the round star's edge: a donor near
+  filling its lobe started with no field in the tip at L1 that becomes the stream. The taper now
+  follows the star as it will settle, solved before the run in the settling's own balance
+  (about 1.5 s a star).
 
 ### Fixed
 

@@ -2139,7 +2139,14 @@ $`E`$ includes $`B^2/2`$.
   modes of A between $`2\pi/R`$ and 8 times that with $`|A_k| \propto k^{-17/6}`$ (a Kolmogorov
   $`E_B(k) \propto k^{-5/3}`$), tapered the same way and scaled so that the mean $`B^2`$ within
   $`R/5`$ of the center gives the beta. The taper takes the preset's own pressure profile, not
-  the settled one. With the taper linear in p, B falls about as fast as p toward the surface
+  the settled one, except for a star in a binary's Roche potential: there it takes the pressure
+  of the star as it will settle (`problems/roche_scf.ts`), solved before the run in the
+  settling's own balance, $`h + \phi = C`$ in its own potential (by FFT on 32 cells across its
+  reach), the companion's as a point, the centrifugal term and the settling's hold, by
+  self-consistent-field rounds. A star that nearly fills its lobe is stretched to a point at L1,
+  out where the round profile has no pressure; tapered by the round profile, the field stopped
+  short of the tip at L1 that feeds the stream. Against the settled 0.6 M☉ donor of a run at
+  fill 0.97 the solved pressure is within 10% everywhere, out to the tip. With the taper linear in p, B falls about as fast as p toward the surface
   (in a cold white dwarf a little faster, about $`p^{1.4}`$), so the plasma beta climbs as
   $`1/p`$ or more: in a 0.6 solar mass white dwarf with beta $`10^5`$ at the center, it is
   $`10^8`$ by $`6\times10^4`$ g/cm³. The taper `sqrt` (`field.taper`) takes its square root

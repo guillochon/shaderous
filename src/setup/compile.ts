@@ -382,7 +382,7 @@ function fieldOf(spec: SetupSpec, ndim: 2 | 3): { potential: PotentialFn | null;
   const pots: PotentialFn[] = [];
   const faces: FaceFn[] = [];
   for (const st of bodies.stars) {
-    const A = starPotential(st);
+    const A = starPotential(st, bodies.binary, G);
     if (A) pots.push(A);
   }
   // The finest grid the document names: a thin disk's loops follow its gas, whose height is

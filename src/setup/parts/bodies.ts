@@ -13,6 +13,7 @@ import { laneEmden, laneEmdenCached, polytropeK, polytropeMass, polytropeScales 
 import { polytropeBarotrope, type Barotrope } from '../../problems/settle';
 import type { PointMass } from '../../problems/types';
 import { binaryOmega, fillSeparation, innerLagrange, type RocheBody } from '../../problems/roche';
+import { rocheStar } from '../../problems/roche_scf';
 import { coldPressure, degenerateBarotrope, scalesOf, whiteDwarf } from '../../problems/white_dwarf';
 import type { MassPart, OrbitPart, Part, SetupSpec, StarPart, Vec3 } from '../spec';
 
@@ -193,14 +194,43 @@ function buildStar(part: StarPart, G: number, eos: Eos | undefined) {
   return out;
 }
 
-/** The field inside a star, as a vector potential about the star's center (mhd/star_fields.ts). */
-export function starPotential(st: BuiltStar): ((x: number, y: number, z: number) => [number, number, number]) | null {
+const rocheCache = new Map<string, ((x: number, y: number, z: number) => number) | null>();
+
+/**
+ * The pressure of a star settled in a binary's Roche potential (problems/settle.ts), at (x, y, z)
+ * from its center: the star solved ahead of the run, in balance in its own potential and the
+ * binary's (problems/roche_scf.ts). It stretches toward L1 and is a little less dense at the
+ * center than the round star, and the field's taper follows it, so that the field fills the
+ * star the run settles, out to the tip at L1. Cached: the field asks for it block by block.
+ */
+export function rochePressure(st: BuiltStar, bin: BinaryFrame, G: number): ((x: number, y: number, z: number) => number) | null {
+  const lobe = bin.lobe;
+  const toL1 = bin.l1.get(st.id);
+  if (!lobe || toL1 === undefined) return null;
+  const c = [st.center[0], st.center[1], st.center[2] ?? 0];
+  const key = JSON.stringify([st.part, c, bin.omega, lobe, G]);
+  if (rocheCache.has(key)) return rocheCache.get(key)!;
+  const reach = Math.min(st.reach ?? 1.5 * st.R, toL1);
+  const solved = rocheStar({ center: c, M: st.M, R: st.R, reach, rho0: (r) => st.rho(r), barotrope: st.barotrope, pressure: (r) => st.pressure(r), G, omega: bin.omega, lobe });
+  const out = solved.pressure;
+  rocheCache.set(key, out);
+  return out;
+}
+
+/**
+ * The field inside a star, as a vector potential about the star's center (mhd/star_fields.ts).
+ * A star in a binary, settled in its Roche potential, has its field follow the pressure it will
+ * settle to (rochePressure), not its round profile's.
+ */
+export function starPotential(st: BuiltStar, bin?: BinaryFrame, G?: number): ((x: number, y: number, z: number) => [number, number, number]) | null {
   const f = st.part.field;
   if (!f) return null;
   const seed = Math.round(f.seed ?? 1);
   // A field left without its beta takes the option table's default (options.ts), as the dialog shows it: undefined made it NaN.
   const beta = f.beta > 0 ? f.beta : 1000;
-  const own = st.profile();
+  const round = st.profile();
+  const at = bin && G !== undefined && (f.type === 'dipole' || f.type === 'random') ? rochePressure(st, bin, G) : null;
+  const own = at ? { ...round, pressureAt: at, pc: at(0, 0, 0) } : round;
   // A cut given in the setup replaces the star's own (a fraction of the central pressure).
   const prof = f.cut !== undefined && f.cut >= 0 ? { ...own, pcut: Math.min(f.cut, 0.99) * own.pc } : own;
   // The taper's exponent: the field follows the pressure (1) or its square root (1/2).
