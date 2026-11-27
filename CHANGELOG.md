@@ -9,6 +9,26 @@ What changed in each release of Shaderous. A release's section here is the body 
 
 ### Added
 
+- **A reference state** (Solver: Reference state; `physics.reference`, link key `ref`): the gas
+  is stored as its difference from a state at rest in hydrostatic balance, built from the
+  initial state, so single precision holds small pressure differences to their own size instead
+  of to the size of the pressure (docs/numerics.md section 7). *Uniform* (no gravity) holds slow
+  flow under a large background pressure: the Gresho vortex at Mach 10⁻⁴ keeps its velocity to
+  13% on 128² cells and 4.7% on 256², where without it the error is 41% and does not fall with
+  the grid. *Column* (a uniform field) holds a static atmosphere over any number of decades: an
+  isothermal column with a density contrast of 10⁻²⁴ stays below Mach 10⁻⁸ for a sound crossing,
+  where without it it falls apart past a contrast of 10⁻¹⁰. For the ideal gas with explicit
+  pressure on the uniform grid, so far.
+- **Presets for it**: *Deep atmosphere* (an isothermal atmosphere at rest over 40 scale heights,
+  which stirs itself up within a sound crossing without the reference and stays still with it)
+  and *Gresho vortex: gas at Mach 0.001*, each with the reference among its featured settings.
+- **A convection preset** (*Convection*, under Instabilities): a layer steeper than the adiabat,
+  built in the grid's own hydrostatic balance and stored against its reference column, whose
+  seeded cells grow into convection at about Mach 0.1 (Mach 0.3 at a superadiabatic excess of
+  0.1; the speed goes as the excess's square root, the same within 50% on 256 cells). Below an
+  excess of about 10⁻³ on 128 cells the scheme's own error in the buoyancy drives the flow
+  instead (docs/numerics.md section 7): deep stellar convection is not within reach yet.
+
 - **Several profiles at once.** Each line the Profile tool places is added to those on show, up
   to six, each in a colour of its own and numbered; their plots are overlaid in one panel, one
   field for all, and hovering the plot reads every line at that distance. Each line can be

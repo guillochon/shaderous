@@ -38,7 +38,14 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(local_invocation
     let c = vec3<i32>(gid);
     let u2 = textureLoad(U2, c, 0);
     comp_use(comp_tex(c));
-    var w = prim_from_cons(textureLoad(U1, c, 0), u2);
+    var w: Prims;
+    // (A gas stored as its deviation from a reference: only the velocity and sound speed are read below.)
+    if (REF_DEV) {
+      let r = ref_at(c);
+      w = prim_dev(textureLoad(U1, c, 0), u2, r);
+      w.w1.x += r.x;
+    }
+    else { w = prim_from_cons(textureLoad(U1, c, 0), u2); }
     // (As load_q in hydro/recon.wgsl returns it, before the radiation's share below.)
     prim_store(c, w.w1, vec4<f32>(w.w2.x, w.w2.z, w.w2.y, u2.w));
     // Unsplit scheme: the stable step is set by the sum of the per-axis signal speeds.

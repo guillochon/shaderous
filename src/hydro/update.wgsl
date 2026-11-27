@@ -338,6 +338,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(workgroup_id) wi
 
   var u1 = textureLoad(U1, c, 0);
   var u2 = textureLoad(U2, c, 0);
+  // A gas stored as its deviation from a reference: the cell's (hydro/advance.wgsl advance_dev).
+  if (REF_DEV) { g_aref = ref_at(c); }
   // A non-inertial frame's velocity-dependent forces, the first half step of them
   // (gravity/frame_off.wgsl); the second is applied after the second kick.
   if (FRAME_ON) {
@@ -364,7 +366,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(workgroup_id) wi
     let kx = 0.5 * clock.dt * u1.x * ext_accel(cell_pos(c));
     kick = 0.5 * clock.dt * u1.x * g_self(c) + kx;
     let ke = select(kx, kick, !flux_work);
-    ekick = dot(ke, u1.yzw + 0.5 * kick) / max(u1.x, P.rho_floor);
+    // (The kick is (rho - rho_ref) g for a gas stored as its deviation from a reference, its
+    // kinetic energy that of the whole density.)
+    ekick = dot(ke, u1.yzw + 0.5 * kick) / max(u1.x + g_aref.x, P.rho_floor);
   }
 
   // Turbulence driving (hydro/drive.wgsl): a whole step's kick, in kick form.

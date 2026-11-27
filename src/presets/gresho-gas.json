@@ -1,0 +1,69 @@
+{
+  "format": "shaderous-setup",
+  "version": 1,
+  "id": "gresho-gas",
+  "name": "Gresho vortex",
+  "group": "Slow flows",
+  "family": "gresho",
+  "familyName": "Gresho vortex",
+  "variant": "Gas at Mach 0.001",
+  "blurb": "The same steady vortex in an ideal gas whose sound speed is a thousand times its fastest flow. The pressure differences that hold the vortex are a millionth of the pressure, a few steps of single precision's rounding of it: the gas is stored as its difference from the mean state (Reference state: Uniform), which holds them to their own size. With the reference off, the vortex is lost to rounding below about Mach 0.0015 however fine the grid.",
+  "domain": {
+    "ndim": 2,
+    "n": 128,
+    "amr": 0,
+    "box": 1,
+    "supports2d": true,
+    "bc": {
+      "lo": [
+        0,
+        0,
+        0
+      ],
+      "hi": [
+        0,
+        0,
+        0
+      ]
+    }
+  },
+  "physics": {
+    "eos": "ideal",
+    "eosParams": {
+      "gamma": 1.4
+    },
+    "gravity": "off",
+    "G": 0,
+    "riemann": "hllclm",
+    "reference": "uniform"
+  },
+  "parts": [
+    {
+      "kind": "flow",
+      "name": "gresho",
+      "mach": 0.001
+    }
+  ],
+  "run": {
+    "tEnd": null,
+    "checkpointDt": 0.1,
+    "tDyn": 1.2566
+  },
+  "view": {
+    "field": 4,
+    "log": false,
+    "mode": "slice"
+  },
+  "featured": [
+    {
+      "path": "parts.0.mach",
+      "id": "mach",
+      "label": "Mach number",
+      "min": 0.0001,
+      "max": 0.5,
+      "factor": 2,
+      "tip": "The vortex's peak speed over the sound speed. The steps a turn takes grow as its inverse. Changing it starts the run again"
+    },
+    "physics.reference"
+  ]
+}

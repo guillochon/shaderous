@@ -1,0 +1,87 @@
+{
+  "format": "shaderous-setup",
+  "version": 1,
+  "id": "convection",
+  "name": "Convection",
+  "group": "Instabilities",
+  "family": "convection",
+  "familyName": "Convection",
+  "variant": "Stratified layer",
+  "blurb": "A layer of gas whose temperature falls upward faster than the adiabat, between walls in a uniform field: warm gas from below rises, cool gas from above sinks, and two seeded pairs of cells grow into convection at about Mach 0.1 within a few tens of time units, mixing the two halves (the colour). The layer is built in the grid's own hydrostatic balance and stored as its difference from the layer at rest (Reference state: Column), which conserves its energy five times better than the plain state. The flow's speed grows as the square root of the superadiabatic excess. Below an excess of about 1e-3 on 128 cells the scheme's own error in the layer's buoyancy drives it instead, and the speed no longer follows the excess: deep in a star, where the excess is 1e-6 or less, is out of reach so far.",
+  "domain": {
+    "ndim": 2,
+    "n": 128,
+    "amr": 0,
+    "box": 1,
+    "supports2d": true,
+    "bc": {
+      "lo": [
+        0,
+        0,
+        2
+      ],
+      "hi": [
+        0,
+        0,
+        2
+      ]
+    },
+    "bc2d": {
+      "lo": [
+        0,
+        2,
+        0
+      ],
+      "hi": [
+        0,
+        2,
+        0
+      ]
+    }
+  },
+  "physics": {
+    "eos": "ideal",
+    "eosParams": {
+      "gamma": 1.6666666666666667
+    },
+    "gravity": "off",
+    "G": 0,
+    "gext": {
+      "down": 1
+    },
+    "reference": "column"
+  },
+  "parts": [
+    {
+      "kind": "flow",
+      "name": "convection",
+      "delta": 0.01,
+      "beta": 0.5,
+      "seed": 0.001,
+      "cells": 2
+    }
+  ],
+  "run": {
+    "tEnd": null,
+    "checkpointDt": 1,
+    "tDyn": 20
+  },
+  "view": {
+    "field": 2,
+    "log": false,
+    "mode": "slice",
+    "axis": 2
+  },
+  "featured": [
+    {
+      "path": "parts.0.delta",
+      "id": "delta",
+      "label": "Superadiabatic excess",
+      "min": 1e-06,
+      "max": 0.2,
+      "factor": 2,
+      "tip": "How much steeper than the adiabat the layer is (dln T / dln p less (gamma - 1) / gamma). At 0.1 the cells turn at about Mach 0.3, at 0.01 at Mach 0.1; the speed goes as its square root. Below about 1e-3 on 128 cells the scheme's own error in the buoyancy is larger than the excess, and the flow is the grid's. Changing it starts the run again"
+    },
+    "physics.reference"
+  ]
+}

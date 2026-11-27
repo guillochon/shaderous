@@ -33,3 +33,18 @@ fn dual_energy(rho: f32, ke: f32, E: f32, eint: f32) -> vec2<f32> {
   let ei = eos_eint_from_p(rho, eos_pressure(rho, 0.0));
   return vec2<f32>(ke + ei, ei);
 }
+
+// The same for a gas stored as its deviation from a reference (hydro/ref_on.wgsl): Ed and eid are
+// the deviations of E and rho e from the reference's internal energy per volume, er, and so is
+// the pair returned. The choice is made on the whole energies; what is stored is never formed
+// from them, so a deviation keeps its own precision.
+fn dual_energy_dev(rho: f32, ke: f32, Ed: f32, eid: f32, er: f32) -> vec2<f32> {
+  let ethd = Ed - ke;
+  let emin = eos_eint_floor(rho);
+  if (er + ethd > P.eta_dual * (er + Ed) && er + ethd >= emin) {
+    return vec2<f32>(Ed, ethd);
+  }
+  var ei = eid;
+  if (!(er + ei >= emin)) { ei = emin - er; }
+  return vec2<f32>(ke + ei, ei);
+}

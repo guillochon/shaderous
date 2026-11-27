@@ -543,7 +543,7 @@ export class Renderer {
 
   /** The field passes' code for a run, and their constants: a view that holds one field reads it in place of the state (amr/field.wgsl BAKED). */
   private fieldCode(fieldShader: string, cfg: SimConfig): { code: string; k?: Record<string, number> } {
-    const code = assemble(fieldShader, { eos: hydroSlots(cfg).eos, cooling: COOLING_MODULES[cfg.cooling], diffusion: hydroSlots(cfg).diffusion, comp: hydroSlots(cfg).comp, opacity: hydroSlots(cfg).opacity });
+    const code = assemble(fieldShader, { eos: hydroSlots(cfg).eos, cooling: COOLING_MODULES[cfg.cooling], diffusion: hydroSlots(cfg).diffusion, comp: hydroSlots(cfg).comp, opacity: hydroSlots(cfg).opacity, refdev: hydroSlots(cfg).refdev });
     return { code, k: cfg.viewBaked ? { BAKED: 1 } : undefined };
   }
 

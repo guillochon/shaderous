@@ -80,6 +80,17 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
       else if (k == 3) { xp = n; } else if (k == 4) { ym = n; } else { yp = n; }
     }
   }
+  // A gas stored as its deviation from a reference (hydro/ref_on.wgsl): the cell's reference,
+  // and its density's difference across the cell along each axis.
+  if (REF_DEV) {
+    let r = ref_at(c);
+    g_qs = r.xy;
+    for (var a = 0; a < 3; a++) {
+      var e = vec3<i32>(0);
+      e[a] = 1;
+      g_rds[a] = ref_slope(ref_at(c - e), r, ref_at(c + e));
+    }
+  }
   var pr = predictor(
     q,
     xm, xp,

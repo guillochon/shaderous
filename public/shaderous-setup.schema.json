@@ -743,6 +743,15 @@
      "title": "Pressure",
      "description": "How the pressure acts. Explicit: in the fluxes between cells, with a timestep that follows the sound speed. Implicit: advection is explicit and the pressure is solved for each step, so the timestep follows the flow speed, however fast the sound: for the liquid and the ideal gas, in Cartesian coordinates, on the uniform grid or the adaptive mesh"
     },
+    "reference": {
+     "enum": [
+      "off",
+      "uniform",
+      "column"
+     ],
+     "title": "Reference state",
+     "description": "Store the gas as its difference from a state at rest in hydrostatic balance, built from the initial state. Single precision then holds small differences to their own size: the pressure differences of slow flow under a large background pressure (below about Mach 0.003 the plain state rounds them away), and a steep atmosphere at rest over many decades of density. Uniform: the initial mean, for a run without gravity. Column: the initial mean in each layer across a uniform field. For the ideal gas with explicit pressure, on the uniform grid"
+    },
     "cutCells": {
      "type": "boolean",
      "title": "Partly filled cells",
@@ -3069,6 +3078,42 @@
      },
      {
       "type": "object",
+      "title": "Flow: Isothermal atmosphere",
+      "properties": {
+       "kind": {
+        "const": "flow"
+       },
+       "id": {
+        "type": "string",
+        "description": "A name other parts refer to it by (an orbit’s `of`, a disk’s `about`)"
+       },
+       "name": {
+        "const": "atmosphere"
+       },
+       "T": {
+        "type": "number",
+        "title": "Temperature",
+        "default": 0.025,
+        "minimum": 1e-8,
+        "maximum": 100000000
+       },
+       "rho0": {
+        "type": "number",
+        "title": "Density at the bottom",
+        "default": 1,
+        "minimum": 1e-20,
+        "maximum": 100000000000000000000
+       }
+      },
+      "required": [
+       "kind",
+       "name"
+      ],
+      "additionalProperties": false,
+      "description": "Gas at one temperature at rest in a unit box, in hydrostatic balance with the uniform downward acceleration g of the setup (Gravity: Uniform acceleration), between walls at the bottom and top: the density falls by e every scale height, T / g. Built in the grid’s own balance, cell by cell, so nothing should move. Up is y in 2D and z in 3D."
+     },
+     {
+      "type": "object",
       "title": "Flow: Carbon–oxygen fuel with an ignition layer",
       "properties": {
        "kind": {
@@ -3309,6 +3354,56 @@
       ],
       "additionalProperties": false,
       "description": "Kidder’s isentropic compression (Coggeshall 1991, problem 6): gas falling inward homologously, u = -r t / (tau^2 - t^2), squeezed without a shock so that all of it reaches the center at t = tau. Needs gamma = 5/3 in spherical symmetry, 2 in cylindrical and 3 in planar"
+     },
+     {
+      "type": "object",
+      "title": "Flow: Convecting layer",
+      "properties": {
+       "kind": {
+        "const": "flow"
+       },
+       "id": {
+        "type": "string",
+        "description": "A name other parts refer to it by (an orbit’s `of`, a disk’s `about`)"
+       },
+       "name": {
+        "const": "convection"
+       },
+       "delta": {
+        "type": "number",
+        "title": "Superadiabatic excess",
+        "default": 0.01,
+        "minimum": 0.000001,
+        "maximum": 0.2
+       },
+       "beta": {
+        "type": "number",
+        "title": "Temperature drop",
+        "default": 0.5,
+        "minimum": 0.01,
+        "maximum": 0.95
+       },
+       "seed": {
+        "type": "number",
+        "title": "Seed Mach number",
+        "default": 0.001,
+        "minimum": 0,
+        "maximum": 0.5
+       },
+       "cells": {
+        "type": "number",
+        "title": "Cells across",
+        "default": 2,
+        "minimum": 1,
+        "maximum": 16
+       }
+      },
+      "required": [
+       "kind",
+       "name"
+      ],
+      "additionalProperties": false,
+      "description": "A layer of ideal gas in a unit box, stratified as a polytrope steeper than the adiabat, in balance with the uniform downward acceleration of the setup (Gravity: Uniform acceleration), between walls at the bottom and top: it overturns in convection cells. Seeded with cells at a given Mach number. Up is y in 2D and z in 3D. Below an excess of about 1e-3 on 128 cells the scheme’s own error in the layer’s buoyancy drives the flow, not the excess"
      },
      {
       "type": "object",

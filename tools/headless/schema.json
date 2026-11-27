@@ -378,6 +378,11 @@
    "about": "Pressure: explicit, implicit"
   },
   {
+   "key": "ref",
+   "group": "settings",
+   "about": "Reference state: off, uniform, column"
+  },
+  {
    "key": "cut",
    "group": "settings",
    "about": "Partly filled cells (0 or 1)"

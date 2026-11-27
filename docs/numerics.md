@@ -319,6 +319,102 @@ catch what remains. The number of floored cells is a diagnostic shown in the int
 $`\lambda_J = \sqrt{\pi c_s^2/(G\rho)}`$ is resolved by at least $`N_J \ge 4`$ cells, the
 condition of [Truelove et al. (1997)][Truelove1997].
 
+### Deviations from a reference
+
+`hydro/ref_on.wgsl`, `hydro/refstate.ts`; `physics.reference` in a setup. Single precision holds
+a number to a relative $`2^{-24}`$, so a pressure difference smaller than that part of the
+pressure itself is lost when the energy is stored. Slow flow lives in such differences: a
+vortex at Mach number $`M`$ is held by pressure differences of $`M^2`$ of the pressure, one
+float32 step of it at $`M = 3.4\times10^{-4}`$, and the hydro-proofs failure maps found the
+Gresho vortex lost below Mach 0.0014 however fine the grid, with implicit pressure as without.
+A static atmosphere fails the same way over many decades of density: rounding of order
+$`10^{-7}`$ in its initial state sends sound waves up the column whose speed grows as
+$`\rho^{-1/2}`$, reaching Mach $`10^{-3}`$ near a total contrast of $`10^{-10}`$
+([§8](#8-well-balanced-reconstruction)).
+
+With a reference state the gas is stored as its deviation from a state at rest in hydrostatic
+balance, as the well-balanced low-Mach scheme of [Edelmann et al. (2021)][Edelmann2021] splits
+its state:
+
+```math
+\mathbf U = (\rho - \rho_0,\ \rho\mathbf v,\ E - e_0,\ \rho e - e_0,\ \rho s), \qquad e_0 = p_0/(\gamma - 1),
+```
+
+and the primitives the reconstruction and the predictor carry are $`\rho - \rho_0`$ and
+$`p - p_0 = (\gamma - 1)(\rho e - e_0)`$, formed with no large pressure on the way. The
+reference's own forces cancel exactly and are never computed: the momentum fluxes take
+$`p - p_0`$ (the contact speed of HLLC too), the gravity kick is $`(\rho - \rho_0)\mathbf g`$,
+and the balanced reconstruction's add-back is $`-(\rho - \rho_0)\Delta\Phi`$. The reference
+enters only where its size is what matters: the densities of the mass fluxes, the sound speed,
+and the energy fluxes, which carry $`(E + p)\mathbf v`$ and so are small where the flow is.
+Each face takes the reference's density there (minmod-limited along its axis) and its pressure
+carried to the face along the balance; the half step advects the reference's gradients; the
+dual-energy switch decides on the whole energies but never forms the stored ones from them.
+
+The reference is built once from the initial state in double precision: **uniform**, the
+state's mean (a run without gravity), or a **column**, the mean of each layer across a uniform
+field, its pressure integrated from the top layer's down with the trapezoid rule of
+[§8](#8-well-balanced-reconstruction), which makes it balanced exactly. The deviations are taken
+in double precision before anything is rounded, so a column that starts at rest has deviations
+of zero. The display, the diagnostics and `readState` show the whole state.
+
+So far it is for the ideal gas with explicit pressure on the uniform grid, in Cartesian
+coordinates, and without the physics whose passes read the state as it is (cooling, burning,
+diffusion, sources, damping, driving, species, radiation, a magnetic field, bodies, point
+masses, self-gravity, rotating frames): `refUnsupported` in `src/sim.ts` says which.
+
+Measured, against the same runs without it (2D, $`\gamma = 1.4`$). The isothermal columns of
+the hydro-proofs maps, $`h`$ cells per scale height, with floors below their top cells; the
+largest Mach number after a sound crossing:
+
+| Column | Contrast | Without | With |
+|---|---|---|---|
+| $`h = 2.85`$, 64 cells | $`2\times10^{-10}`$ | $`3.6\times10^{-4}`$ | $`4\times10^{-17}`$ |
+| $`h = 1.2`$, 64 cells | $`5\times10^{-25}`$ | 1.0 (destroyed) | $`2\times10^{-10}`$ |
+| $`h = 0.7`$, 32 cells | $`8\times10^{-25}`$ | 0.72 | $`7\times10^{-11}`$ |
+| $`h = 0.6`$, 24 cells | $`1\times10^{-24}`$ | 0.24 | $`7\times10^{-9}`$ |
+
+The Gresho vortex of those maps at $`t = 0.2`$, with HLLC's low-Mach correction; the mean
+velocity error:
+
+| Mach number, grid | Without | With |
+|---|---|---|
+| $`3\times10^{-4}`$, $`128^2`$ | 25% | 7.1% |
+| $`10^{-4}`$, $`128^2`$ | 41% | 13% |
+| $`10^{-4}`$, $`256^2`$ | (about 50% at any grid) | 4.7% |
+
+What is left with it falls with the grid: the scheme's dissipation, not the rounding. A column
+whose top lies below single precision's smallest normal number ($`10^{-38}`$) is beyond
+reach either way: the reference itself cannot hold it. The presets *Deep atmosphere* (40 scale
+heights: Mach $`3\times10^{-10}`$ after a sound crossing with the reference, 1.4 without) and
+*Gresho vortex, gas at Mach 0.001* show it, with the reference among their featured settings.
+
+Slow convection is not yet within reach, and not for want of precision. A polytropic layer in
+discrete balance whose temperature gradient is $`\delta`$ off the adiabat, seeded with
+convection cells at Mach $`10^{-3}`$ (2D, $`\gamma = 5/3`$, its temperature halving over a
+box of 128 cells, about 100 cells per pressure scale height at the bottom): at
+$`\delta = -10^{-3}`$, stable, the kinetic energy fell to 0.11 of its start by $`t = 1000`$; at
+$`\delta = -10^{-5}`$, still stable, it grew 20 times, to Mach 0.008, as it did at
+$`\delta = 0`$ and at every $`\delta`$ from $`10^{-10}`$ to $`10^{-5}`$, with the reference or
+without. On 256 cells the neutral layer's grew 1.9 times. The scheme's own error in the
+layer's buoyancy is between $`10^{-5}`$ and $`10^{-3}`$ of the adiabatic gradient on 128
+cells and falls fast with the grid; below it a layer convects at a speed set by the grid, not
+by its stratification. Plain HLL is far worse (a stable layer's kinetic energy grew 85 times
+by $`t = 300`$), the minmod limiter better (it fell to 0.01). The *Convection* preset is this
+layer at $`\delta = 0.01`$, well above that floor: its cells settle at Mach 0.07 to 0.1 with a
+kinetic energy of $`4.5\times10^{-4}`$ on 128 cells and $`6.8\times10^{-4}`$ on 256, and
+$`\delta = 0.1`$ gives Mach 0.27, the speed going as $`\sqrt{\delta}`$. At $`\delta = 10^{-3}`$
+the cells peak at Mach 0.045 and then sink to the floor's level.
+
+The columns also needed HLLC to be exact at rest ([§6](#hllc-default)): it forms its star
+state's density as $`\rho(S - u)/(S - S^*)`$ and the flux from that less $`\rho`$, which at a
+face at rest is $`\rho S/S - \rho`$, $`10^{-7}`$ of the density, every step. With a reference
+it forms the difference directly, $`\rho(S^* - u)/(S - S^*)`$, zero there, and likewise for the
+momentum and energy: without it the $`h = 0.6`$ column above reached Mach 1.7. Without a
+reference the original form is kept. The two differ only in rounding, which is one among
+others of that size there; the axisymmetric column of the validation suite, at that floor,
+went from Mach $`7.5\times10^{-5}`$ to $`1.7\times10^{-4}`$ with the new form.
+
 ## 8. Well-balanced reconstruction
 
 `hydro/q.wgsl`. In hydrostatic balance the pressure itself is not smooth across a stratified
@@ -1632,8 +1728,8 @@ as GADGET-2 ([Springel 2005][Springel2005]).
   ones. Longer cycles would need the finer levels re-meshed within a cycle. With self-gravity
   cycles stop at 16 substeps: over 32 the potential carried forward between solves (below)
   lagged an Evrard collapse (128 finest, 3 levels, to $`t = 0.8`$) enough to lose
-  $`2.3	imes10^{-3}`$ of its energy, against $`5.7	imes10^{-4}`$ with one timestep and
-  $`6.0	imes10^{-4}`$ with cycles of 16.
+  $`2.3\times10^{-3}`$ of its energy, against $`5.7\times10^{-4}`$ with one timestep and
+  $`6.0\times10^{-4}`$ with cycles of 16.
 - At the start of a cycle each block gets a bin $`k`$ from its own signal speed, on the GPU.
   A block in bin $`k`$ advances $`2^k\Delta t_\text{min}`$ at a time.
 - A first sweep lowers every block to the bin of its fastest face neighbor (once, so each fast
@@ -3118,13 +3214,13 @@ unit tests check that each one satisfies the Euler equations and its jump condit
 - **Uniform collapse** (ExactPack's noh2; `uniform-collapse-*` presets, the
   `uniform-collapse` flow): $`u = -r/(1 - t)`$, with the density and the specific internal
   energy uniform along the adiabat. At $`t = 0.6`$, with the outer faces held, the L1 error in
-  density, pressure and velocity is at most $`2.5	imes10^{-6}`$ planar, $`6.6	imes10^{-6}`$
-  cylindrical and $`5.5	imes10^{-5}`$ spherical.
+  density, pressure and velocity is at most $`2.5\times10^{-6}`$ planar, $`6.6\times10^{-6}`$
+  cylindrical and $`5.5\times10^{-5}`$ spherical.
 - **Coggeshall's similarity solutions** ([Coggeshall 1991][Coggeshall1991]; `coggeshall-*`
   presets and flows, spherical, both radial faces held): problem 1, free homologous expansion
   with a uniform pressure; problem 2, homologous expansion against a pressure rising outward;
   problem 6, Kidder's isentropic compression ($`\gamma = 5/3`$), to 0.6 of the starting radii.
-  L1 errors are at most $`10^{-4}`$, $`1.4	imes10^{-4}`$ and $`5	imes10^{-5}`$. Problems 1
+  L1 errors are at most $`10^{-4}`$, $`1.4\times10^{-4}`$ and $`5\times10^{-5}`$. Problems 1
   and 2 are singular at $`t = 0`$, so their runs start at $`t_0 = 1`$ of the solution. The other
   Euler-only problems need $`\gamma < 1`$ or a negative temperature (3, 4, 5), or are the Noh
   problem again (19). Problem 20, Noh with a uniform collapse added, is not consistent as
@@ -3144,8 +3240,7 @@ unit tests check that each one satisfies the Euler equations and its jump condit
   the explosive is all burned: a moving piston, an obstacle, cannot carry the species a burn
   needs. The products escape into vacuum and a rarefaction runs back and reflects from the
   piston; at the end the density is within 1.3%, the pressure 3.2% (it goes as
-  $`
-ho^3`$), and the velocity 0.17% of the CJ speed.
+  $`\rho^3`$), and the velocity 0.17% of the CJ speed.
 
 ## 24. Radiation transport
 
@@ -3818,6 +3913,7 @@ two levels of blocks (the test's threshold is 1e-4).
 [Berger1989]: https://doi.org/10.1016/0021-9991(89)90035-1
 [Brandt1977]: https://doi.org/10.1090/S0025-5718-1977-0431719-X
 [Bryan1995]: https://doi.org/10.1016/0010-4655(94)00191-4
+[Edelmann2021]: https://doi.org/10.1051/0004-6361/202140653
 [Cada2009]: https://doi.org/10.1016/j.jcp.2009.02.020
 [Chandrasekhar1935]: https://doi.org/10.1093/mnras/95.3.207
 [Davis1988]: https://doi.org/10.1137/0909030

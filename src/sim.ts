@@ -41,6 +41,8 @@ import { RadPasses, type RadDiagnostics } from './radiation/passes';
 import { diffusionFlux, splitPressure } from './radiation/init';
 
 import type { LimiterKind, RiemannKind } from './problems/types';
+import { buildReference, packReference, refAt, REF_CELLS, type RefKind, type RefState } from './hydro/refstate';
+export { REF_KINDS, type RefKind } from './hydro/refstate';
 export { LIMITER_KINDS, RIEMANN_KINDS, type LimiterKind, type RiemannKind } from './problems/types';
 
 export interface SimConfig {
@@ -206,6 +208,15 @@ export interface SimConfig {
    * equation of state on a uniform grid (implicitUnsupported).
    */
   pressure: 'explicit' | 'implicit';
+  /**
+   * The gas stored as its deviation from a reference state at rest in hydrostatic balance
+   * (hydro/ref_on.wgsl, hydro/refstate.ts; docs/numerics.md section 7): 'uniform', the initial
+   * state's mean, for a run without gravity; 'column', the initial state's mean in each layer
+   * across the uniform field, rebalanced. Single precision then holds slow flow's small pressure
+   * differences under a large background pressure, and a steep atmosphere at rest, to their own
+   * size. The ideal gas on the uniform grid (refUnsupported).
+   */
+  reference: RefKind;
   /**
    * Partly filled cells (plans/wind-tunnel.md 8.1; hydro/cut.ts): obstacles cut cells where their
    * surfaces lie, each cell holding gas in a share of its volume and each face open in a share of
@@ -660,6 +671,7 @@ export function configFor(problem: Problem, n: number, over: Partial<SimConfig> 
     gravEnergyFlux: problem.geometry !== 'spherical',
     wellBalanced: true,
     pressure: 'explicit',
+    reference: 'off',
     cutCells: false,
     pressureCycles: 3,
     pressureTol: 1e-4,
@@ -789,6 +801,7 @@ export function refusal(c: SimConfig): string | null {
     ['MHD', mhdOn(c) ? mhdUnsupported(c) : null],
     ['Liquid', c.eos === 'liquid' ? liquidUnsupported(c) : null],
     ['Implicit pressure', implicitPressure(c) ? implicitUnsupported(c) : null],
+    ['Reference state', refUnsupported(c)],
     ['Mirror symmetry', symmetryUnsupported(c)],
     ['Comoving coordinates', cosmologyUnsupported(c)],
     ['Shearing box', shearUnsupported(c)],
@@ -801,6 +814,41 @@ export function refusal(c: SimConfig): string | null {
   ];
   const hit = why.find(([, w]) => w);
   return hit ? `${hit[0]}: ${hit[1]}` : null;
+}
+
+/** The gas is stored as its deviation from a reference state (SimConfig.reference, hydro/ref_on.wgsl). */
+export const refOn = (c: SimConfig): boolean => c.reference !== 'off' && !refUnsupported(c);
+
+/**
+ * Why a run cannot store its gas as a deviation from a reference state as configured, or null.
+ * The first version (docs/numerics.md section 7): the ideal gas, explicit pressure, on the uniform
+ * grid in Cartesian coordinates, with no gravity ('uniform') or a uniform field along one axis
+ * with walls or open faces across it ('column'), and none of the physics whose passes read the
+ * state as it is (cooling, burning, diffusion, sources, damping, driving, species, radiation, a
+ * magnetic field, bodies, point masses, self-gravity, rotating or accelerating frames).
+ */
+export function refUnsupported(c: SimConfig): string | null {
+  if (c.reference === 'off') return null;
+  if (c.eos !== 'ideal') return 'for the ideal gas only, so far';
+  if (c.amrLevels > 0) return 'on the uniform grid only, so far';
+  if (implicitPressure(c)) return 'with explicit pressure only, so far';
+  if (c.problem.mhd || radiationOn(c) || (c.problem.species?.length ?? 0) > 0) return 'not with a magnetic field, radiation or species, so far';
+  if (c.problem.geometry || c.problem.shear || cosmologyOf(c) || (c.symmetry ?? []).some(Boolean)) return 'in Cartesian coordinates, without mirror symmetry, a shearing box or comoving coordinates';
+  if (isSelfGravity(c.gravity) || (c.problem.masses?.(c.params, c.G, c.problem.box / c.n, c.ndim) ?? []).length > 0) return 'not with self-gravity or point masses, so far';
+  if (rotationOf(c).some((v) => v !== 0) || c.problem.frame) return 'not in a rotating or accelerating frame';
+  if (c.viscosity > 0 || conducts(c) || c.cooling !== 'off' || burnSpec(c)) return 'not with viscosity, conduction, cooling or burning, so far';
+  if (c.problem.bodies?.length || c.problem.obstacleDistances || c.problem.moving?.length || c.problem.damping || c.driving.accel > 0 || c.fluff.rho > 0) return 'not with obstacles, damping zones, driving or tenuous-gas limits, so far';
+  if ((c.startDamping?.rate ?? 0) > 0) return 'not with start-up damping';
+  const g = uniformField(c).slice(0, c.ndim);
+  const on = g.filter((v) => v !== 0).length;
+  if (c.reference === 'uniform' && on > 0) return 'a uniform reference is for a run without gravity: in a uniform field, take the column';
+  if (c.reference === 'column') {
+    if (on !== 1) return 'a column needs a uniform field along one axis of the grid';
+    const a = g.findIndex((v) => v !== 0);
+    if (c.bcLo[a] === 0 || c.bcHi[a] === 0) return 'a column needs walls or open faces across its field, not periodic ones';
+    if (gridDims(c)[a] > REF_CELLS) return `a column may have at most ${REF_CELLS} cells along its field`;
+  }
+  return null;
 }
 
 /** Partly filled cells are in force: asked for, with obstacles to cut (hydro/cut.ts). */
@@ -954,7 +1002,7 @@ const COSTLY_EOS: readonly EosKind[] = ['gas_radiation', 'degenerate', 'ionizing
  * stores them, and the predictor).
  */
 export function primStored(c: SimConfig): boolean {
-  if (c.amrLevels > 0 || c.problem.mhd || cosmologyOf(c)) return false;
+  if (c.amrLevels > 0 || c.problem.mhd || cosmologyOf(c) || refOn(c)) return false;
   return c.storedPrims ?? COSTLY_EOS.includes(c.eos);
 }
 
@@ -1093,6 +1141,8 @@ export function hydroSlots(c: SimConfig): Record<string, string> {
     moving: movingFlags(c.amrLevels > 0 ? [] : (c.problem.moving ?? []), movingFractions(c)),
     // Partly filled cells (hydro/cut.ts), on the uniform grid.
     cut: cutSlot(cutOn(c)),
+    // A gas stored as its deviation from a reference state (hydro/ref_on.wgsl), or as it is.
+    refdev: refOn(c) ? 'hydro/ref_on.wgsl' : 'hydro/ref_off.wgsl',
     // Stored primitives on the uniform grid (primStored): the rates pass writes them, load_q reads them.
     ...(primStored(c) ? { prim_load: 'hydro/prim_load_on.wgsl', prim_store: 'hydro/prim_store_on.wgsl' } : {}),
   };
@@ -1577,12 +1627,12 @@ export function unfoldDiagnostics(d: Diagnostics, symmetry: readonly boolean[] |
 }
 
 /** Size of the Params uniform block (hydro/common.wgsl). */
-export const PARAM_BYTES = 560;
+export const PARAM_BYTES = 576 + 16 * REF_CELLS;
 
 /** Pack the Params block. The layout must match the struct in hydro/common.wgsl. */
 export function packParams(
   c: SimConfig,
-  x: { dims: number[]; rect?: boolean; dx: number; rhoMean: number; selfGravity: boolean; masses: number; amr?: number[]; refine?: number[]; solids?: boolean; sources?: boolean; scale?: number; vref?: number; pref?: number; gravCorrection?: boolean },
+  x: { dims: number[]; rect?: boolean; dx: number; rhoMean: number; selfGravity: boolean; masses: number; amr?: number[]; refine?: number[]; solids?: boolean; sources?: boolean; scale?: number; vref?: number; pref?: number; gravCorrection?: boolean; ref?: RefState | null },
 ): ArrayBuffer {
   const buf = new ArrayBuffer(PARAM_BYTES);
   const u = new Uint32Array(buf);
@@ -1662,6 +1712,8 @@ export function packParams(
   // Start-up damping (hydro/damping.wgsl P.calm): off unless both its rate and its time are positive.
   const sd = c.startDamping;
   f.set(sd && sd.rate > 0 && sd.time > 0 ? [sd.rate, sd.time, 0, 0] : [0, 0, 0, 0], 136);
+  // The reference state the gas is stored as its deviation from (hydro/refstate.ts), or none.
+  packReference(f, 140, x.ref ?? null);
   return buf;
 }
 
@@ -1885,6 +1937,8 @@ export class Sim implements Simulation {
   private gPsInit: GPUBindGroup[] = [];
   /** A gas's reference pressure for the implicit solve: its mean when the state was set (0 for a liquid). */
   private pRef = 0;
+  /** The reference state the gas is stored as its deviation from (SimConfig.reference), or null. */
+  private ref: RefState | null = null;
   /** The face velocities the update kept, for a gas's correction (pressure/store_on.wgsl). */
   private faceVel?: GPUTexture;
   /** A gas's implicit solve is for the pressure's change: the pressure at the start of the step, and the new one (for the predictor), both less the reference. */
@@ -2547,6 +2601,7 @@ export class Sim implements Simulation {
       gravCorrection: this.selfGravity && !this.sphMono && energyCorrection(c) && this.mg?.aux.width === this.nx,
       sources: this.nSources > 0,
       pref: this.pRef,
+      ref: this.ref,
     });
     this.device.queue.writeBuffer(this.params, 0, buf);
     this.prs?.setTolerance(c.pressureTol);
@@ -2594,6 +2649,11 @@ export class Sim implements Simulation {
     this.device.queue.writeBuffer(this.sources, 0, packSources([]));
     // Partly filled cells: which cells are solid comes from the cut geometry (hydro/cut.ts).
     const cutMarks = cutOn(c) && !c.restart ? this.cutGeometry().solid : null;
+    // A gas stored as its deviation from a reference (hydro/refstate.ts): each cell's density,
+    // internal energy and kinetic energy in double precision, which the reference is built from
+    // and taken from before anything is rounded to single precision.
+    const dev = refOn(c) ? { rho: new Float64Array(cells), eint: new Float64Array(cells), ke: new Float64Array(cells) } : null;
+    this.ref = null;
     for (let k = 0; k < nz; k++) {
       const z = nz === 1 ? 0 : (k + 0.5) * this.dx + lo[2];
       for (let j = 0; j < ny; j++) {
@@ -2644,9 +2704,27 @@ export class Sim implements Simulation {
           u2[o + 1] = eint;
           u2[o + 2] = w.rho * w.s;
           u2[o + 3] = mark;
+          if (dev) {
+            dev.rho[o / 4] = w.rho;
+            dev.eint[o / 4] = eint;
+            dev.ke[o / 4] = 0.5 * w.rho * (w.vx * w.vx + w.vy * w.vy + w.vz * w.vz) * go;
+          }
           if (G) packSpecies(sp, o, cells * 4, G, w.rho, w.X);
           mass += w.rho;
         }
+      }
+    }
+    if (dev) {
+      const gamma = c.eosParams.gamma;
+      const ref = buildReference(c.reference as 'uniform' | 'column', [nx, ny, nz], dev.rho, dev.eint.map((e) => (gamma - 1) * e), gamma, uniformField(c), this.dx);
+      if (typeof ref === 'string') throw new Error(`Reference state: ${ref}`);
+      this.ref = ref;
+      for (let q = 0, o = 0; q < cells; q++, o += 4) {
+        const [rr, , er] = refAt(ref, [nx, ny, nz], q);
+        const ed = dev.eint[q] - er;
+        u1[o] = dev.rho[q] - rr;
+        u2[o] = ed + dev.ke[q];
+        u2[o + 1] = ed;
       }
     }
     this.setState(u1, u2, mass / cells);
@@ -3614,10 +3692,27 @@ export class Sim implements Simulation {
   /** Current conserved state as float arrays (validation only). */
   async readState(): Promise<{ u1: Float32Array; u2: Float32Array }> {
     const [a, b] = this.state[this.cur];
-    return {
-      u1: await readTexture(this.device, a, this.nx, 4, this.nz, this.ny),
-      u2: await readTexture(this.device, b, this.nx, 4, this.nz, this.ny),
-    };
+    const u1 = await readTexture(this.device, a, this.nx, 4, this.nz, this.ny);
+    const u2 = await readTexture(this.device, b, this.nx, 4, this.nz, this.ny);
+    // A gas stored as its deviation from a reference (hydro/refstate.ts): the whole state, the
+    // reference added in double precision and rounded once.
+    const ref = this.ref;
+    if (ref) {
+      const dims = [this.nx, this.ny, this.nz];
+      for (let q = 0, o = 0; o < u1.length; q++, o += 4) {
+        const [rr, , er] = refAt(ref, dims, q);
+        u1[o] += rr;
+        u2[o] += er;
+        u2[o + 1] += er;
+      }
+    }
+    return { u1, u2 };
+  }
+
+  /** The state as the textures hold it: for a gas stored as its deviation from a reference, the deviations (validation). */
+  async readStoredState(): Promise<{ u1: Float32Array; u2: Float32Array }> {
+    const [a, b] = this.state[this.cur];
+    return { u1: await readTexture(this.device, a, this.nx, 4, this.nz, this.ny), u2: await readTexture(this.device, b, this.nx, 4, this.nz, this.ny) };
   }
 
   /**

@@ -99,7 +99,10 @@ fn magnetic_value(f: u32, c: vec3<i32>, p: f32, rho: f32, x: vec3<f32>) -> f32 {
 
 // Velocity and density of a neighboring cell, clamped to the grid.
 fn neighbor(c: vec3<i32>) -> vec4<f32> {
-  let u = textureLoad(U1, clamp(c, vec3<i32>(0), vec3<i32>(P.dims.xyz) - 1), 0);
+  let cc = clamp(c, vec3<i32>(0), vec3<i32>(P.dims.xyz) - 1);
+  var u = textureLoad(U1, cc, 0);
+  // (A gas stored as its deviation from a reference, hydro/ref_on.wgsl: the whole density.)
+  if (REF_DEV) { u.x += ref_at(cc).x; }
   let rho = max(u.x, P.rho_floor);
   return vec4<f32>(u.yzw / rho, rho);
 }
@@ -119,8 +122,14 @@ fn gradients(c: vec3<i32>) -> Grad {
 // The field at cell c (display voxels are the grid's cells).
 fn voxel(c: vec3<i32>) -> Cell {
   g_dx = P.dx;
-  let u1 = textureLoad(U1, c, 0);
-  let u2 = textureLoad(U2, c, 0);
+  var u1 = textureLoad(U1, c, 0);
+  var u2 = textureLoad(U2, c, 0);
+  // A gas stored as its deviation from a reference (hydro/ref_on.wgsl): the whole state is shown.
+  if (REF_DEV) {
+    let r = ref_at(c);
+    u1.x += r.x;
+    u2 = vec4<f32>(u2.x + r.z, u2.y + r.z, u2.zw);
+  }
   var g: Grad;
   if (field_needs_grad(V.field)) { g = gradients(c); }
   // The uniform field's potential, measured from the box center, is not in the texture.

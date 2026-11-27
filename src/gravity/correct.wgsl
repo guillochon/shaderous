@@ -9,6 +9,7 @@
 #include "hydro/common.wgsl"
 #include <eos>
 #include "hydro/dual_energy.wgsl"
+#include <refdev>
 #include "hydro/fluff.wgsl"
 #include <frame>
 
@@ -60,6 +61,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     u2 = left.u2 + vec4<f32>(emag, 0.0, 0.0, 0.0);
   }
 
+  // A gas stored as its deviation from a reference (hydro/ref_on.wgsl): u1.x is the density's
+  // deviation, on which gravity acts (the reference is balanced), and rho the whole density.
+  var rf = vec4<f32>(0.0);
+  if (REF_DEV) { rf = ref_at(c); }
+  let rho = u1.x + rf.x;
   let kx = 0.5 * clock.dt * u1.x * ext_accel(cell_pos(c));
   let kick = 0.5 * clock.dt * u1.x * g_self(c) + kx;
   var mom = u1.yzw + kick;
@@ -67,12 +73,12 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   var eint = u2.y;
   if ((P.flags & 1u) == 0u) {
     // Kick-consistent energy: add exactly the kinetic energy of the kick (no cancellation).
-    E += dot(kick, u1.yzw + 0.5 * kick) / u1.x;
+    E += dot(kick, u1.yzw + 0.5 * kick) / rho;
   } else {
     // Flux-form energy: E already holds self-gravity's work for the whole step; the point
     // masses' and the frame's part of the kick adds its own (gravity/ext.wgsl). Then re-derive
     // e_int.
-    E += dot(kx, u1.yzw + 0.5 * kick) / u1.x;
+    E += dot(kx, u1.yzw + 0.5 * kick) / rho;
     if ((P.flags & 64u) != 0u) {
       // The update charged the work with the potential the step started from, phi^n
       // (gravity/field.wgsl). With the new one known, move it to the mean of the two solves,
@@ -84,7 +90,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
       E -= 0.5 * drho * (textureLoad(G, c, 0).w - textureLoad(PHI_OLD, c, 0).x);
     }
     g_kphi = swirl_ke(u1.x, mom);
-    let en = dual_energy(u1.x, 0.5 * dot(mom, mom) / u1.x + emag, E, eint);
+    var en: vec2<f32>;
+    if (REF_DEV) { en = dual_energy_dev(rho, 0.5 * dot(mom, mom) / rho, E, eint, rf.z); }
+    else { en = dual_energy(u1.x, 0.5 * dot(mom, mom) / u1.x + emag, E, eint); }
     E = en.x;
     eint = en.y;
   }
@@ -97,11 +105,14 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     eint = fs.u2.y;
   }
 
-  let tame = tame_fluff(u1.x, mom, eint);
+  // (On the whole density: a gas stored as its deviation from a reference has u1.x below zero
+  // wherever it is thinner than the reference, which the limits took for tenuous gas and
+  // stopped. Such a run has no limits, P.fluff.x being zero, and is never changed here.)
+  let tame = tame_fluff(rho, mom, eint);
   if (tame.changed) {
     mom = tame.mom;
     eint = tame.eint;
-    E = 0.5 * dot(mom, mom) / u1.x + emag + eint;
+    E = 0.5 * dot(mom, mom) / rho + emag + eint;
   }
 
   textureStore(O1, c, vec4<f32>(u1.x, mom));

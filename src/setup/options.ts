@@ -148,6 +148,16 @@ const eosKind = (s: SetupSpec): string => {
   return s.physics?.eos ?? 'ideal';
 };
 
+// The uniform field of a setup, by axis: its own (gext) and the Constant field's, down (y in 2D, z in 3D).
+const uniformG = (s: SetupSpec): number[] => {
+  const ndim = s.domain?.ndim ?? 3;
+  const ge = s.physics?.gext;
+  const g = Array.isArray(ge) ? [...ge] : [0, 0, 0];
+  if (ge && !Array.isArray(ge)) g[ndim === 2 ? 1 : 2] -= ge.down;
+  if (s.physics?.gravity === 'constant') g[ndim === 2 ? 1 : 2] -= typeof s.physics.G === 'number' ? s.physics.G : 1;
+  return g.slice(0, ndim);
+};
+
 /** What rules are about: each a named property of a setup, with how to say it. */
 export const FACTS: Record<string, { label: string; of: (s: SetupSpec) => Value; say?: (v: Value) => string }> = {
   'domain.ndim': { label: 'Dimensions', of: (s) => s.domain?.ndim ?? 3, say: (v) => `${v}D` },
@@ -199,6 +209,29 @@ export const FACTS: Record<string, { label: string; of: (s: SetupSpec) => Value;
   'physics.shear': { label: 'A shearing box', of: (s) => !!s.physics?.shear },
   'physics.cosmology': { label: 'Comoving coordinates', of: (s) => !!s.physics?.cosmology },
   'parts.flow.whole': { label: 'A flow that fills the box', of: (s) => count(s, (p) => !!flowDef(p)?.wholeBox) > 0 },
+  'gravity.uniform': { label: 'A uniform field', of: (s) => uniformG(s).some((v) => v !== 0) },
+  // A reference column (SimConfig.reference): a field along one axis, with walls or open faces across it.
+  'gravity.column': {
+    label: 'A uniform field along one axis of the grid, with walls or open faces across it',
+    of: (s) => {
+      const g = uniformG(s);
+      const a = g.findIndex((v) => v !== 0);
+      // (A 2D run takes its 2D faces where the document gives them.)
+      const bc = (g.length === 2 ? s.domain?.bc2d : undefined) ?? s.domain?.bc ?? { lo: [1, 1, 1], hi: [1, 1, 1] };
+      return g.filter((v) => v !== 0).length === 1 && bc.lo[a] !== 0 && bc.hi[a] !== 0;
+    },
+  },
+  // What a gas stored as its deviation from a reference does not take yet (sim.ts refUnsupported).
+  'reference.blocked': {
+    label: 'Cooling, burning, viscosity, conduction, driving, a rotating or accelerating frame, tenuous-gas limits, start-up damping, obstacles, inflows, an orbit or a wind tunnel',
+    of: (s) => {
+      const ph = s.physics ?? {};
+      const om = ph.rotation?.omega ?? [0, 0, 0];
+      return (ph.cooling ?? 'off') !== 'off' || !!ph.burn || (ph.viscosity ?? 0) > 0 || (ph.conductivity ?? 0) > 0 || (ph.driving?.accel ?? 0) > 0 ||
+        om.some((v) => v !== 0) || (ph.frame ?? 'inertial') !== 'inertial' || (ph.fluff?.rho ?? 0) > 0 || (ph.startDamping?.rate ?? 0) > 0 ||
+        parts(s).some((p) => ['obstacle', 'inflow', 'tunnel', 'orbit'].includes(p.kind));
+    },
+  },
 };
 
 /** A setup's facts, all of them. */
@@ -455,6 +488,26 @@ export const OPTIONS: Option[] = [
   { path: 'physics.startDamping.rate', label: 'Start-up damping rate', tip: 'For a while after the start, every cell’s velocity is damped at this rate (per unit time), so that whatever settled stars are still out of balance with on the grid is taken away while it is small instead of ringing through the run. The rate falls smoothly to zero over the start-up damping time. 0 is off', page: 'solver', control: num(0, undefined, { factor: 2 }), apply: 'live', default: 0, linkKey: 'sdr', cfg: 'startDamping.rate' },
   { path: 'physics.startDamping.time', label: 'Start-up damping time', tip: 'Time from the start over which the start-up damping falls smoothly to zero (as a half cosine). 0 is off', page: 'solver', control: num(0, undefined, { factor: 2, quantity: 'time' }), apply: 'live', default: 0, linkKey: 'sdt', cfg: 'startDamping.time' },
   { path: 'physics.pressure', label: 'Pressure', tip: 'How the pressure acts. Explicit: in the fluxes between cells, with a timestep that follows the sound speed. Implicit: advection is explicit and the pressure is solved for each step, so the timestep follows the flow speed, however fast the sound: for the liquid and the ideal gas, in Cartesian coordinates, on the uniform grid or the adaptive mesh', page: 'solver', control: pick({ value: 'explicit', label: 'Explicit' }, { value: 'implicit', label: 'Implicit (solved each step)' }), apply: 'restart', default: 'explicit', linkKey: 'psplit', cfg: 'pressure' },
+  { path: 'physics.reference', label: 'Reference state', tip: 'Store the gas as its difference from a state at rest in hydrostatic balance, built from the initial state. Single precision then holds small differences to their own size: the pressure differences of slow flow under a large background pressure (below about Mach 0.003 the plain state rounds them away), and a steep atmosphere at rest over many decades of density. Uniform: the initial mean, for a run without gravity. Column: the initial mean in each layer across a uniform field. For the ideal gas with explicit pressure, on the uniform grid', page: 'solver',
+    control: pick({ value: 'off', label: 'Off' }, { value: 'uniform', label: 'Uniform (no gravity)', excludes: [{ fact: 'gravity.uniform', reason: 'In a uniform field, take the column' }] }, { value: 'column', label: 'Column (uniform field)', requires: [{ fact: 'gravity.column' }] }),
+    apply: 'restart', default: 'off', linkKey: 'ref', cfg: 'reference',
+    requires: [{ fact: 'physics.eos', is: 'ideal', reason: 'For the ideal gas, so far' }],
+    excludes: [
+      { fact: 'mesh.adaptive', reason: 'On the uniform grid only, so far' },
+      { fact: 'pressure.implicit', reason: 'With explicit pressure only, so far' },
+      { fact: 'magnetic', reason: 'Not with a magnetic field, so far' },
+      { fact: 'radiation', reason: 'Not with radiation, so far' },
+      { fact: 'species.any', reason: 'Not with species, so far' },
+      { fact: 'domain.curvilinear', reason: 'In Cartesian coordinates only' },
+      { fact: 'gravity.self', reason: 'Not with self-gravity, so far' },
+      { fact: 'parts.body', reason: 'Not with stars or point masses, so far' },
+      { fact: 'physics.shear', reason: 'Not in a shearing box' },
+      { fact: 'physics.cosmology', reason: 'Not with comoving coordinates' },
+      { fact: 'symmetric.x', reason: 'Not with mirror symmetry, so far' }, { fact: 'symmetric.y', reason: 'Not with mirror symmetry, so far' }, { fact: 'symmetric.z', reason: 'Not with mirror symmetry, so far' },
+      { fact: 'parts.moving', reason: 'Not with moving obstacles' },
+      { fact: 'parts.damping', reason: 'Not with damping zones, so far' },
+      { fact: 'reference.blocked' },
+    ] },
   { path: 'physics.storedPrims', label: 'Stored primitives', tip: 'Uniform grid: convert each cell from its conserved state to density, velocity and pressure once a step and keep the result, instead of converting it again at every one of the some twenty loads of the cell in a step. The results are the same. It costs 32 bytes of GPU memory per cell, and saves most where the equation of state solves for its temperature or reads a table (Helmholtz or ANEOS: steps about three times faster on an A100). Automatic: on for every equation of state but the ideal gas, the barotropic gas and the liquid', page: 'solver', control: pick({ value: 'auto', label: 'Automatic' }, { value: 'on', label: 'On' }, { value: 'off', label: 'Off' }), apply: 'restart', default: 'auto', linkKey: 'sprim', excludes: [{ fact: 'mesh.adaptive', reason: 'The adaptive mesh stores its primitives anyway' }, { fact: 'magnetic', reason: 'Not with a magnetic field' }] },
   { path: 'physics.cutCells', label: 'Partly filled cells', tip: 'Obstacles cut the cells their surfaces cross: each cell holds gas in a share of its volume and each face is open in a share of its area, so a body keeps its true shape below a cell (a thin blade, its pitch), where the plain grid makes it a staircase of whole cells. For the liquid with implicit pressure, on the uniform grid, with obstacles at rest', page: 'solver', control: check, apply: 'restart', default: false, linkKey: 'cut', cfg: 'cutCells', show: { path: 'physics.pressure', is: ['implicit'] },
     requires: [{ fact: 'pressure.implicit' }, { fact: 'physics.eos', is: 'liquid', reason: 'For the liquid, so far' }],

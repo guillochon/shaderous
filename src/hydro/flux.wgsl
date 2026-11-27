@@ -19,11 +19,16 @@
 // state takes the composition of the cell it was reconstructed in.
 // Both form the difference from the same two values whichever cell asks, so the two cells
 // sharing a face still compute the same flux bit for bit.
-struct Side { rho: f32, v: vec3<f32>, p: f32, s: f32, cs: f32, eint: f32 }
+// `pd` is the pressure the momentum fluxes and the contact speed take: the pressure itself, or,
+// for a gas stored as its deviation from a reference (hydro/ref_on.wgsl), its deviation p - p_ref,
+// the reference's own pressure being balanced and left out. `p` is the whole pressure, for the
+// sound speed and the energy flux.
+struct Side { rho: f32, v: vec3<f32>, p: f32, s: f32, cs: f32, eint: f32, pd: f32 }
 // `d` is the viscous part of the flux on its own, (momentum, energy), which a cell needs to
 // work out how much the viscosity heats it (hydro/diffusion.wgsl).
 struct Flux { m: f32, mom: vec3<f32>, e: f32, ei: f32, s: f32, vn: f32, d: vec4<f32> }
 
+#include <refdev>
 #include <riemann>
 #include "hydro/diffusion.wgsl"
 #include "hydro/moving_flags.wgsl"
@@ -49,16 +54,22 @@ fn unrot(v: vec3<f32>, axis: i32) -> vec3<f32> {
 // jump of several decades (the edge of a star in near-vacuum) the face density of the dense
 // cell can therefore land at almost nothing, still positive, with the pressure not following:
 // a state with an enormous sound speed, whose flux empties the light cell in one step.
-fn to_side(pr: Q, s: Q, sgn: f32, axis: i32, lo: vec2<f32>) -> Side {
+// `rf` is the reference on this side (hydro/ref_on.wgsl ref_face) for a gas stored as its
+// deviation from one, whose half-step state and increments are deviations: the face's whole
+// density and pressure are the reference's at the face plus them. Zero otherwise.
+fn to_side(pr: Q, s: Q, sgn: f32, axis: i32, lo: vec2<f32>, rf: vec4<f32>) -> Side {
   let hs = 0.5 * sgn * (1.0 - pr.b.w);
   let a = pr.a + hs * s.a;
   let b = pr.b.xy + hs * s.b.xy;
   var o: Side;
-  o.rho = max(a.x, max(lo.x, P.rho_floor));
+  o.rho = max(a.x + rf.z, max(lo.x, P.rho_floor));
   o.v = rot(a.yzw, axis);
   o.s = b.y;
   if (EOS_HAS_ENERGY) {
-    o.p = max(b.x, max(lo.y, P.p_floor));
+    o.p = max(b.x + rf.w, max(lo.y, P.p_floor));
+    // (Raised by a floor or the bound, the deviation follows.)
+    o.pd = select(b.x, o.p - rf.w, o.p != b.x + rf.w);
+    if (!REF_DEV) { o.pd = o.p; }
     let f = eos_face(o.rho, o.p);
     o.cs = f.x;
     o.eint = f.y;
@@ -66,6 +77,7 @@ fn to_side(pr: Q, s: Q, sgn: f32, axis: i32, lo: vec2<f32>) -> Side {
     // Barotropic: the face pressure is a function of the face density, not reconstructed.
     let st = baro_state(o.rho);
     o.p = st.x;
+    o.pd = o.p;
     o.cs = st.y;
     o.eint = eos_eint_from_p(o.rho, o.p);
   }
@@ -75,8 +87,9 @@ fn to_side(pr: Q, s: Q, sgn: f32, axis: i32, lo: vec2<f32>) -> Side {
 // Flux through the face between cells l and r, along +axis, in grid-aligned components. kl
 // and kr are the two cells' composition moments. dfl and dfr are the potential steps that the
 // two sides' edge increments were given toward this face (edge_up's and edge_dn's `df`; zero
-// without the balanced reconstruction).
-fn face_flux(l: Q, ls: Q, r: Q, rs: Q, axis: i32, kl: vec4<f32>, kr: vec4<f32>, dfl: f32, dfr: f32) -> Flux {
+// without the balanced reconstruction). rl and rr are the two sides' references (ref_face) for
+// a gas stored as its deviation from one, zero otherwise.
+fn face_flux(l: Q, ls: Q, r: Q, rs: Q, axis: i32, kl: vec4<f32>, kr: vec4<f32>, dfl: f32, dfr: f32, rl: vec4<f32>, rr: vec4<f32>) -> Flux {
   var w = max(l.b.z, r.b.z);            // carbuncle fix: HLL next to flagged shocks
   // A barotropic gas takes HLL: it has no contact wave to resolve (HLLC was tried on its
   // collapse problems: no different). A liquid keeps HLLC, for the shear wave: HLL damps a jump
@@ -92,17 +105,20 @@ fn face_flux(l: Q, ls: Q, r: Q, rs: Q, axis: i32, kl: vec4<f32>, kr: vec4<f32>, 
   // column with fewer than 2 cells per scale height has its balanced wall pressure,
   // p (1 - 1/2h), below p / 2: the bound raised it, and the top cell fell at Mach 0.002 (h =
   // 0.99) to 0.08 (h = 0.7) in a sound crossing (hydro-proofs' column maps).
-  var pb = min(l.b.x, r.b.x);
+  // (Of the whole densities and pressures, for a gas stored as its deviation from a reference.)
+  let al = vec2<f32>(l.a.x + rl.x, l.b.x + rl.y);
+  let ar = vec2<f32>(r.a.x + rr.x, r.b.x + rr.y);
+  var pb = min(al.y, ar.y);
   if (!p_signed()) {
-    let el = l.b.x - 0.5 * l.a.x * dfl;
-    let er = r.b.x + 0.5 * r.a.x * dfr;
-    pb = min(pb, min(select(l.b.x, el, el > 0.0), select(r.b.x, er, er > 0.0)));
+    let el = al.y - 0.5 * al.x * dfl;
+    let er = ar.y + 0.5 * ar.x * dfr;
+    pb = min(pb, min(select(al.y, el, el > 0.0), select(ar.y, er, er > 0.0)));
   }
-  let lo = 0.5 * vec2<f32>(min(l.a.x, r.a.x), pb);
+  let lo = 0.5 * vec2<f32>(min(al.x, ar.x), pb);
   comp_use(kl);
-  let sl = to_side(l, ls, 1.0, axis, lo);
+  let sl = to_side(l, ls, 1.0, axis, lo, rl);
   comp_use(kr);
-  let sr = to_side(r, rs, -1.0, axis, lo);
+  let sr = to_side(r, rs, -1.0, axis, lo, rr);
   var F = riemann_flux(sl, sr, w);
   F.mom = unrot(F.mom, axis);
   return F;
@@ -190,13 +206,32 @@ fn axis_fluxes(c: vec3<i32>, e: vec3<i32>, axis: i32, w0: Q, p0: Q) -> Faces {
   // true one) reaches the wall from the other side: the negative of the true step.
   let fm = select(-t.x, t.x, d.y == t.x);
   let fp = select(-t.y, t.y, d.z == t.y);
+  // A gas stored as its deviation from a reference (hydro/ref_on.wgsl): the five cells'
+  // references, each increment's middle cell's for the limiter's scales, and each side's at
+  // its face.
+  var r0 = vec4<f32>(0.0);
+  var r1 = vec4<f32>(0.0);
+  var r2 = vec4<f32>(0.0);
+  var r3 = vec4<f32>(0.0);
+  var r4 = vec4<f32>(0.0);
+  if (REF_DEV) {
+    r0 = ref_at(c - 2 * e);
+    r1 = ref_at(c - e);
+    r2 = ref_at(c);
+    r3 = ref_at(c + e);
+    r4 = ref_at(c + 2 * e);
+    g_qs = r1.xy;
+  }
   let sm = edge_up(wm2, wm1, w0, d.x, d.y, fm);
+  if (REF_DEV) { g_qs = r2.xy; }
   let lo = edge_dn(wm1, w0, wp1, d.y, d.z, t.x);
   let hi = edge_up(wm1, w0, wp1, d.y, d.z, t.y);
+  if (REF_DEV) { g_qs = r3.xy; }
   let sp = edge_dn(w0, wp1, wp2, d.z, d.w, fp);
+  if (REF_DEV) { g_qs = vec2<f32>(0.0); }
   return Faces(
-    add_diffusion(wall_face(face_flux(pm1, sm, p0, lo, axis, km1, k0, fm, t.x), below, axis, nm1.a[axis + 1]), c - e, e, axis, nm1, w0),
-    add_diffusion(wall_face(face_flux(p0, hi, pp1, sp, axis, k0, kp1, t.y, fp), above, axis, np1.a[axis + 1]), c, e, axis, w0, np1),
+    add_diffusion(wall_face(face_flux(pm1, sm, p0, lo, axis, km1, k0, fm, t.x, ref_face(r0, r1, r2, 1.0, fm), ref_face(r1, r2, r3, -1.0, t.x)), below, axis, nm1.a[axis + 1]), c - e, e, axis, nm1, w0),
+    add_diffusion(wall_face(face_flux(p0, hi, pp1, sp, axis, k0, kp1, t.y, fp, ref_face(r1, r2, r3, 1.0, t.y), ref_face(r2, r3, r4, -1.0, fp)), above, axis, np1.a[axis + 1]), c, e, axis, w0, np1),
   );
 }
 
@@ -268,9 +303,23 @@ fn flux_between(a: vec3<i32>, e: vec3<i32>, axis: i32) -> Flux {
   // the wall from its own side.
   let fl = ws.x * (sides.x * ws.y);
   let fr = ws.x * (sides.y * ws.z);
+  // (A gas stored as its deviation from a reference: as axis_fluxes, hydro/ref_on.wgsl.)
+  var r0 = vec4<f32>(0.0);
+  var r1 = vec4<f32>(0.0);
+  var r2 = vec4<f32>(0.0);
+  var r3 = vec4<f32>(0.0);
+  if (REF_DEV) {
+    r0 = ref_at(a - e);
+    r1 = ref_at(a);
+    r2 = ref_at(a + e);
+    r3 = ref_at(a + 2 * e);
+    g_qs = r1.xy;
+  }
   let sl = edge_up(wll, wl, wr, d.x, d.y, fl);
+  if (REF_DEV) { g_qs = r2.xy; }
   let sr = edge_dn(wl, wr, wrr, d.y, d.z, fr);
-  return add_diffusion(wall_face(face_flux(pl, sl, pr, sr, axis, kl, kr, fl, fr), wall, axis, vw), a, e, axis, nl, nr);
+  if (REF_DEV) { g_qs = vec2<f32>(0.0); }
+  return add_diffusion(wall_face(face_flux(pl, sl, pr, sr, axis, kl, kr, fl, fr, ref_face(r0, r1, r2, 1.0, fl), ref_face(r1, r2, r3, -1.0, fr)), wall, axis, vw), a, e, axis, nl, nr);
 }
 
 fn flux_zero() -> Flux {

@@ -697,6 +697,7 @@ export function compileSetup(input: SetupSpec): Compiled {
   over('limiter', ph.limiter);
   over('cfl', ph.cfl);
   over('pressure', ph.pressure);
+  over('reference', ph.reference);
   over('cutCells', ph.cutCells);
   // ('auto' leaves it to the equation of state: primStored in sim.ts.)
   over('storedPrims', ph.storedPrims === 'on' ? true : ph.storedPrims === 'off' ? false : undefined);

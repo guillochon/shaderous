@@ -23,6 +23,11 @@ fn load_comp(c: vec3<i32>) -> vec4<f32> {
 fn cell_q(c: vec3<i32>) -> Q {
   if (PRIM_STORED) { return Q(prim_a(c), prim_b(c)); }
   let u2 = textureLoad(U2, c, 0);
+  // (A gas stored as its deviation from a reference: the primitives' deviations, hydro/ref_on.wgsl.)
+  if (REF_DEV) {
+    let wd = prim_dev(textureLoad(U1, c, 0), u2, ref_at(c));
+    return Q(wd.w1, vec4<f32>(wd.w2.x, wd.w2.z, wd.w2.y, u2.w));
+  }
   let w = prim_from_cons(textureLoad(U1, c, 0), u2);
   return Q(w.w1, vec4<f32>(w.w2.x, w.w2.z, w.w2.y, u2.w));
 }

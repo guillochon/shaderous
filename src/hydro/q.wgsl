@@ -52,8 +52,13 @@ fn pred_mirror(p: Q, axis: i32) -> Q {
 // where the pressure takes both signs (a liquid's, eos/liquid.wgsl).
 fn p_scale(c: Q) -> f32 {
   if (p_signed()) { return c.a.x * c.b.z * c.b.z; }
-  return c.b.x;
+  return c.b.x + g_qs.y;
 }
+// A gas stored as its deviation from a reference (hydro/ref_on.wgsl): the reference density and
+// pressure of the middle cell of the edge increment being taken, which its callers set, so that
+// smoothness is judged against the whole density and pressure, not their deviations. Zero
+// otherwise.
+var<private> g_qs: vec2<f32> = vec2<f32>(0.0);
 fn wb_below(l: Q, c: Q, dl: f32) -> vec4<f32> {
   var d = c.b - l.b;
   d.x += 0.5 * (l.a.x + c.a.x) * dl;
@@ -67,7 +72,7 @@ fn wb_above(c: Q, r: Q, dr: f32) -> vec4<f32> {
 fn edge_up(l: Q, c: Q, r: Q, dl: f32, dr: f32, df: f32) -> Q {
   var b = edge4(wb_below(l, c, dl), wb_above(c, r, dr), vec4<f32>(p_scale(c), 0.0, c.b.z, 0.0));
   b.x -= c.a.x * df;
-  return Q(edge4(c.a - l.a, r.a - c.a, vec4<f32>(c.a.x, c.b.zzz)), b);
+  return Q(edge4(c.a - l.a, r.a - c.a, vec4<f32>(c.a.x + g_qs.x, c.b.zzz)), b);
 }
 fn edge_dn(l: Q, c: Q, r: Q, dl: f32, dr: f32, df: f32) -> Q {
   var b: vec4<f32>;
@@ -77,6 +82,6 @@ fn edge_dn(l: Q, c: Q, r: Q, dl: f32, dr: f32, df: f32) -> Q {
     b = edge4(wb_above(c, r, dr), wb_below(l, c, dl), vec4<f32>(p_scale(c), 0.0, c.b.z, 0.0));
   }
   b.x -= c.a.x * df;
-  if (LIMITER_SYMMETRIC) { return Q(edge4(c.a - l.a, r.a - c.a, vec4<f32>(c.a.x, c.b.zzz)), b); }
-  return Q(edge4(r.a - c.a, c.a - l.a, vec4<f32>(c.a.x, c.b.zzz)), b);
+  if (LIMITER_SYMMETRIC) { return Q(edge4(c.a - l.a, r.a - c.a, vec4<f32>(c.a.x + g_qs.x, c.b.zzz)), b); }
+  return Q(edge4(r.a - c.a, c.a - l.a, vec4<f32>(c.a.x + g_qs.x, c.b.zzz)), b);
 }

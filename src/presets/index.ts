@@ -17,9 +17,9 @@ export const PRESET_FILES: Record<string, SetupSpec> = Object.fromEntries(Object
  */
 export const PRESET_ORDER: readonly string[] = [
   // Instabilities
-  'kelvin-helmholtz', 'kelvin-helmholtz-he-h', 'kelvin-helmholtz-mhd', 'rayleigh-taylor', 'thermal-instability', 'thermal-instability-hhe', 'driven-turbulence',
+  'kelvin-helmholtz', 'kelvin-helmholtz-he-h', 'kelvin-helmholtz-mhd', 'rayleigh-taylor', 'convection', 'thermal-instability', 'thermal-instability-hhe', 'driven-turbulence',
   // Slow flows
-  'taylor-green', 'shear-layers', 'cylinder-wake', 'wind-tunnel', 'wind-turbine', 'lid-driven-cavity', 'lid-driven-cavity-liquid', 'gresho',
+  'taylor-green', 'shear-layers', 'cylinder-wake', 'wind-tunnel', 'wind-turbine', 'lid-driven-cavity', 'lid-driven-cavity-liquid', 'gresho', 'gresho-gas',
   // Shocks and blasts
   'sedov', 'sedov-rad', 'blast-axisymmetric', 'blast-spherical', 'sod-x', 'sod-y', 'sod-z', 'sod-diag', 'strong-shock',
   'riemann-einfeldt', 'riemann-stationary-contact', 'riemann-slow-shock', 'riemann-shock-contact-shock', 'riemann-leblanc',
@@ -43,7 +43,7 @@ export const PRESET_ORDER: readonly string[] = [
   // Magnetic fields
   'orszag-tang', 'mhd-blast', 'mhd-rotor', 'brio-wu', 'field-loop', 'field-loop-dense', 'alfven-wave', 'alfven-collision', 'alfven-packets', 'tearing', 'island-coalescence', 'x-point', 'driven-turbulence-mhd',
   // Tests and sandbox
-  'advection', 'empty', 'empty-mhd',
+  'advection', 'atmosphere', 'empty', 'empty-mhd',
 ];
 
 const whole = new Map<string, SetupSpec>();

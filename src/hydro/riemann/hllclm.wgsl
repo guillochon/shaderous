@@ -38,8 +38,8 @@ fn riemann_flux(l0: Side, r0: Side, w_hll: f32) -> Flux {
 
   let fml = ml.x;
   let fmr = mr.x;
-  let fpl = ml * l.v.x + vec3<f32>(l.p, 0.0, 0.0);
-  let fpr = mr * r.v.x + vec3<f32>(r.p, 0.0, 0.0);
+  let fpl = ml * l.v.x + vec3<f32>(l.pd, 0.0, 0.0);
+  let fpr = mr * r.v.x + vec3<f32>(r.pd, 0.0, 0.0);
   let fel = (el + l.p) * l.v.x;
   let fer = (er + r.p) * r.v.x;
 
@@ -69,13 +69,38 @@ fn riemann_flux(l0: Side, r0: Side, w_hll: f32) -> Flux {
       out.s = out.m * select(r.s, l.s, up0);
       return out;
     }
-    let sm = (r.p - l.p + l.v.x * ql - r.v.x * qr) / (ql - qr);
+    let sm = (r.pd - l.pd + l.v.x * ql - r.v.x * qr) / (ql - qr);
 
     // HLLC
     var cm: f32;
     var cp: vec3<f32>;
     var ce: f32;
-    if (sm >= 0.0) {
+    // The star state's differences from the outer state, U* - U. For a gas stored as its
+    // deviation from a reference (hydro/ref_on.wgsl) they are written so that nothing large
+    // cancels: with k = (S* - u) / (S - S*), rho* - rho = rho k, and so on. Formed as
+    // rho (S - u) / (S - S*) - rho they round to 1e-7 of rho at a face at rest (S* = u = 0), a
+    // mass flux of 1e-7 rho c every step that waves carry up a stratified column, where they
+    // grow as rho^(-1/2) (docs/numerics.md section 7): a column against its reference held at
+    // Mach 1.7 instead of 1e-8. Without a reference that rounding is one among others of its
+    // size, and the form is the original (the two differ only in rounding, and the axisymmetric
+    // column of the validation suite, at that floor, went from Mach 7.5e-5 to 1.7e-4).
+    if (REF_DEV) {
+      if (sm >= 0.0) {
+        let k = (sm - l.v.x) / (sl - sm);
+        let dr = l.rho * k;
+        let f = l.rho + dr;
+        cm = fml + sl * dr;
+        cp = fpl + sl * vec3<f32>(sm * dr + l.rho * (sm - l.v.x), dr * l.v.y, dr * l.v.z);
+        ce = fel + sl * (el * k + f * (sm - l.v.x) * (sm + l.p / ql));
+      } else {
+        let k = (sm - r.v.x) / (sr - sm);
+        let dr = r.rho * k;
+        let f = r.rho + dr;
+        cm = fmr + sr * dr;
+        cp = fpr + sr * vec3<f32>(sm * dr + r.rho * (sm - r.v.x), dr * r.v.y, dr * r.v.z);
+        ce = fer + sr * (er * k + f * (sm - r.v.x) * (sm + r.p / qr));
+      }
+    } else if (sm >= 0.0) {
       let f = ql / (sl - sm);
       let ms = f * vec3<f32>(sm, l.v.y, l.v.z);
       let es = f * (el / l.rho + (sm - l.v.x) * (sm + l.p / ql));

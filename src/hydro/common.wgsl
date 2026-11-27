@@ -71,6 +71,11 @@ struct Params {
   kap: vec4<f32>,        // the opacity law's constants (opacity/opacity.ts packOpacity)
   calm: vec4<f32>,       // start-up damping (hydro/damping.wgsl): (rate at the start, time over
                          //   which it falls to zero, 0, 0); zero without
+  refx: vec4<f32>,       // the reference state the gas is stored as a deviation from
+                         //   (hydro/ref_on.wgsl): (1 if on, the axis it varies along, 0 to 2,
+                         //   or 3 where it is uniform, 0, 0); all zero without
+  reft: array<vec4<f32>, 2048>, // its values along that axis, cell by cell: (density, pressure,
+                         //   internal energy per volume, 0); entry 0 alone where it is uniform
 }
 
 // The state as the frame slot (gravity/frame_off.wgsl) hands it back.

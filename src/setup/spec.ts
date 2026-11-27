@@ -141,6 +141,8 @@ export interface PhysicsSpec {
   cfl?: number;
   /** how the pressure acts: in the explicit fluxes, or solved for each step (SimConfig.pressure) */
   pressure?: 'explicit' | 'implicit';
+  /** the gas stored as its deviation from a reference state (SimConfig.reference): 'uniform' without gravity, 'column' in a uniform field */
+  reference?: 'off' | 'uniform' | 'column';
   /** obstacles cut the cells they cross (SimConfig.cutCells): the liquid with implicit pressure */
   cutCells?: boolean;
   /** uniform grid: convert each cell to primitives once a step and keep them (SimConfig.storedPrims); auto: where the equation of state is costly */

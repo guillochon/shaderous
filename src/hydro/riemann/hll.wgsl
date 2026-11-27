@@ -10,8 +10,8 @@ fn riemann_flux(l: Side, r: Side, w_hll: f32) -> Flux {
 
   let fml = ml.x;
   let fmr = mr.x;
-  let fpl = ml * l.v.x + vec3<f32>(l.p, 0.0, 0.0);
-  let fpr = mr * r.v.x + vec3<f32>(r.p, 0.0, 0.0);
+  let fpl = ml * l.v.x + vec3<f32>(l.pd, 0.0, 0.0);
+  let fpr = mr * r.v.x + vec3<f32>(r.pd, 0.0, 0.0);
   let fel = (el + l.p) * l.v.x;
   let fer = (er + r.p) * r.v.x;
 
@@ -27,7 +27,7 @@ fn riemann_flux(l: Side, r: Side, w_hll: f32) -> Flux {
     out.m = (sr * fml - sl * fmr + sl * sr * (r.rho - l.rho)) * inv;
     out.mom = (sr * fpl - sl * fpr + sl * sr * (mr - ml)) * inv;
     out.e = (sr * fel - sl * fer + sl * sr * (er - el)) * inv;
-    out.vn = (r.p - l.p + l.v.x * ql - r.v.x * qr) / (ql - qr);
+    out.vn = (r.pd - l.pd + l.v.x * ql - r.v.x * qr) / (ql - qr);
   }
   let up = out.m >= 0.0;
   out.ei = out.m * select(r.eint / r.rho, l.eint / l.rho, up);

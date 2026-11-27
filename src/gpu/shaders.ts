@@ -14,6 +14,8 @@ for (const [k, v] of Object.entries(raw)) shaderFiles[k.replace(/^\.\.\//, '').r
 // species say otherwise.
 const DEFAULT_SLOTS: Slots = {
   comp: 'eos/comp_off.wgsl',
+  // The gas stored as it is, unless hydroSlots says as its deviation from a reference (hydro/ref_on.wgsl).
+  refdev: 'hydro/ref_off.wgsl',
   // A spherical run's geometry is compiled in only where it is one (hydroSlots), so that every
   // other run's shaders are what they were before it, bit for bit (hydro/common.wgsl). A
   // shearing box is left to the run's parameters unless hydroSlots knows there is none.

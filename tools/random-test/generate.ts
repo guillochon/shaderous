@@ -790,6 +790,36 @@ const FIXERS: Record<string, (doc: SetupSpec, want: boolean, value: Value | unde
   'physics.shear': (doc, want, _v, ctx) => (want ? applyShear(doc, ctx) : (removeWhere(doc, (p) => p.kind === 'flow' && p.name.startsWith('shearing')), delete doc.physics!.shear), true),
   'physics.cosmology': (doc, want, _v, ctx) => (want ? applyCosmology(doc, ctx) : (removeWhere(doc, (p) => p.kind === 'flow' && p.name === 'zeldovich'), delete doc.physics!.cosmology), true),
   'parts.flow.whole': (doc, want) => (want ? false : (removeWhere(doc, (p) => p.kind === 'flow' && !!FLOWS[p.name]?.wholeBox), true)),
+  'gravity.uniform': (doc, want, _v, ctx) => {
+    const ph = (doc.physics ??= {});
+    if (want) return (ph.gext = { down: ctx.g.pick([0.5, 1]) }), true;
+    delete ph.gext;
+    if (ph.gravity === 'constant') ph.gravity = 'off';
+    return true;
+  },
+  // A field down the up axis (y in 2D, z in 3D), with walls across it.
+  'gravity.column': (doc, want, _v, ctx) => {
+    if (!want) return false;
+    const ph = (doc.physics ??= {});
+    if (ph.gravity === 'constant') ph.gravity = 'off';
+    ph.gext = { down: ctx.g.pick([0.5, 1]) };
+    const up = ndimOf(doc) === 2 ? 1 : 2;
+    const bc = doc.domain?.bc ?? { lo: [1, 1, 1], hi: [1, 1, 1] };
+    const lo = [...bc.lo];
+    const hi = [...bc.hi];
+    if (lo[up] === PERIODIC) lo[up] = 2;
+    if (hi[up] === PERIODIC) hi[up] = 2;
+    setFaces(doc, lo, hi);
+    if (doc.domain?.bc2d) delete doc.domain.bc2d;
+    return true;
+  },
+  'reference.blocked': (doc, want) => {
+    if (want) return false;
+    const ph = (doc.physics ??= {});
+    for (const k of ['cooling', 'coolParams', 'burn', 'viscosity', 'conductivity', 'driving', 'rotation', 'frame', 'fluff', 'startDamping'] as const) delete ph[k];
+    removeWhere(doc, (p) => ['obstacle', 'inflow', 'tunnel', 'orbit'].includes(p.kind));
+    return true;
+  },
 };
 
 function symmetric(doc: SetupSpec, axis: string, want: boolean): boolean {

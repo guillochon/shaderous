@@ -3,6 +3,7 @@
 #include <eos>
 #include "gravity/rot.wgsl"
 #include "hydro/cut_flags.wgsl"
+#include <refdev>
 
 @group(0) @binding(1) var U1: texture_3d<f32>;
 @group(0) @binding(2) var U2: texture_3d<f32>;
@@ -10,9 +11,15 @@
 @group(0) @binding(4) var HEAT: texture_3d<f32>;   // burning's heating rate over the last step (one texel of 0 without)
 
 fn red_cell(c: vec3<i32>) -> Red {
-  let u1 = textureLoad(U1, c, 0);
-  let u2 = textureLoad(U2, c, 0);
+  var u1 = textureLoad(U1, c, 0);
+  var u2 = textureLoad(U2, c, 0);
   if (u2.w > 0.5) { return red_identity(); }   // solid: no gas
+  // A gas stored as its deviation from a reference (hydro/ref_on.wgsl): the whole state.
+  if (REF_DEV) {
+    let r = ref_at(c);
+    u1.x += r.x;
+    u2 = vec4<f32>(u2.x + r.z, u2.y + r.z, u2.zw);
+  }
   comp_use(comp_tex(c));
   // (An axisymmetric run's cell is a ring: its true volume, 2 pi R dx^2, so masses are true ones.)
   var dv = select(P.geom.x, 6.2831853 * (f32(c.x) + 0.5) * P.dx * P.dx * P.dx, cylindrical());

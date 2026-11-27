@@ -1,0 +1,89 @@
+{
+  "format": "shaderous-setup",
+  "version": 1,
+  "id": "atmosphere",
+  "name": "Deep atmosphere",
+  "group": "Tests and sandbox",
+  "family": "atmosphere",
+  "familyName": "Deep atmosphere",
+  "variant": "Isothermal, 40 scale heights",
+  "blurb": "Gas at one temperature at rest between walls in a uniform field, in exact hydrostatic balance on the grid, over 40 scale heights: the density falls by 10 to the 17 from the bottom to the top. Nothing should move (the view shows the density, on a log scale). Stored as its difference from the column at rest (Reference state: Column), it stays still to the last digit; with the reference off, the rounding of its state sends sound waves up the column that grow as the gas thins, and it stirs itself up within a sound crossing, as it does past about 23 scale heights.",
+  "domain": {
+    "ndim": 2,
+    "n": 128,
+    "amr": 0,
+    "box": 1,
+    "supports2d": true,
+    "bc": {
+      "lo": [
+        0,
+        0,
+        2
+      ],
+      "hi": [
+        0,
+        0,
+        2
+      ]
+    },
+    "bc2d": {
+      "lo": [
+        0,
+        2,
+        0
+      ],
+      "hi": [
+        0,
+        2,
+        0
+      ]
+    }
+  },
+  "physics": {
+    "eos": "ideal",
+    "eosParams": {
+      "gamma": 1.4
+    },
+    "gravity": "off",
+    "G": 0,
+    "gext": {
+      "down": 1
+    },
+    "reference": "column",
+    "floors": {
+      "rho": 1e-30,
+      "p": 1e-32
+    }
+  },
+  "parts": [
+    {
+      "kind": "flow",
+      "name": "atmosphere",
+      "T": 0.025,
+      "rho0": 1
+    }
+  ],
+  "run": {
+    "tEnd": null,
+    "checkpointDt": 0.5,
+    "tDyn": 6.25
+  },
+  "view": {
+    "field": 0,
+    "log": true,
+    "mode": "slice",
+    "axis": 2
+  },
+  "featured": [
+    {
+      "path": "parts.0.T",
+      "id": "T",
+      "label": "Temperature",
+      "min": 0.0125,
+      "max": 1,
+      "factor": 1.25,
+      "tip": "p / rho. The box holds 1 / T scale heights (the acceleration is 1): 40 at the default 0.025, 80 at 0.0125. Changing it starts the run again"
+    },
+    "physics.reference"
+  ]
+}
