@@ -92,6 +92,7 @@ struct Clock {
   hub: f32,
   shear: f32,  // shearing box: the offset of the x faces along y, and its Kahan compensation
   shear_c: f32,
+  hold: f32,   // nonzero: every step is held (dt = 0) until the CPU clears it (amr/flag_hold.wgsl)
 }
 
 @group(0) @binding(0) var<uniform> P: Params;

@@ -22,6 +22,7 @@
 @group(0) @binding(4) var<storage, read_write> ARGS: array<u32>;
 @group(0) @binding(5) var<storage, read_write> LL: array<u32>;
 @group(0) @binding(6) var<storage, read_write> LD: array<u32>;
+@group(0) @binding(7) var<storage, read> clock: Clock;
 
 // Slabs of a long list (amr/list.wgsl): must match SLAB_QUADS, SLAB_BLOCKS and FLAT_ROWS there.
 const SLAB_QUADS = 16384u;
@@ -88,6 +89,10 @@ fn main() {
   // axis may have workgroups)
   put(17u, box17, min(nu, FLAT_ROWS), (nu + FLAT_ROWS - 1u) / FLAT_ROWS);
   put(18u, box17, min(nd, FLAT_ROWS), (nd + FLAT_ROWS - 1u) / FLAT_ROWS);
-  ARGS[60] += nu;
-  ARGS[61] += na;
+  // (Not a cycle the clock holds, at a movie's frame time or a stop: taken at dt = 0, it does
+  // nothing, and a recorded run's totals would differ from the unrecorded one's.)
+  if (clock.dt > 0.0) {
+    ARGS[60] += nu;
+    ARGS[61] += na;
+  }
 }

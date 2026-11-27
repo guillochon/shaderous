@@ -570,6 +570,10 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
       const b = inFlight.shift()!;
       const was = d;
       d = await b.read;
+      // Steps the clock held (at a frame time or a stop) are the batch's last, and add nothing
+      // to its count: the adaptive mesh takes them back from its refinement checks' count.
+      const held = b.taken - (d.steps - was.steps);
+      if (held > 0) s.held?.(held);
       const now = performance.now();
       inFlightSteps -= b.taken;
       // The batch's GPU time: from when it could start (submitted, and the one before it done).
@@ -676,7 +680,10 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
           }
           const gpu = app.gpu();
           const enc = gpu.device.createCommandEncoder();
-          const taken = s.encodeSteps(enc, n);
+          // Near a stop or a frame time, a step the clock holds would count toward a refinement
+          // check, and could be the one a check follows: a check due there waits for the clock's
+          // word (AmrSim.held). A movie's batches are all near one, however the step grows.
+          const taken = s.encodeSteps(enc, n, adaptive && (frameAt !== undefined || n + 1 >= ahead()));
           const copy = taken ? clockCopy(enc, s) : null;
           gpu.device.queue.submit([enc.finish()]);
           s.submitted();

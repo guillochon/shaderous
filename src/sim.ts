@@ -471,8 +471,19 @@ export interface Simulation {
   readonly paramBuffer: GPUBuffer;
   /** The clock on the GPU: (dt, t, Kahan term, steps), as float32. */
   readonly clockBuffer: GPUBuffer;
-  /** Encode up to `count` steps; returns how many were encoded. */
-  encodeSteps(enc: GPUCommandEncoder, count: number): number;
+  /**
+   * Encode up to `count` steps; returns how many were encoded. `mayHold`: the clock may hold
+   * within them (a movie's frame time or a stop is near), and the caller will say with held() how
+   * many it held. `speculate`: up to this many steps may be queued behind an adaptive mesh's
+   * refinement check before its answer is read (the page's own loop), held on the GPU if it
+   * re-meshes. The run takes the same steps either way.
+   */
+  encodeSteps(enc: GPUCommandEncoder, count: number, mayHold?: boolean, speculate?: number): number;
+  /**
+   * The last `units` steps of the last encodeSteps() call were held by the clock (taken at dt = 0,
+   * they did nothing): the adaptive mesh does not count them toward its refinement checks.
+   */
+  held?(units: number): void;
   /** Call after submitting an encoder that encodeSteps() wrote to. */
   submitted(): void;
   /**
@@ -1500,19 +1511,22 @@ export function packBrush(b: BrushOp): ArrayBuffer {
 const DIAG_CHANNELS = 24;
 /** Number of floats the diagnostics readback holds: clock (4), reduction, the Masses block. */
 /** Floats and bytes of the clock (hydro/common.wgsl Clock). */
-export const CLOCK_FLOATS = 10;
+export const CLOCK_FLOATS = 11;
 export const CLOCK_BYTES = 4 * CLOCK_FLOATS;
+/** The clock's hold (Clock.hold): where it sits, in bytes. */
+export const CLOCK_HOLD_BYTE = 40;
 
 /**
  * The clock as a run starts it, at `time` after `steps` steps: (dt, t, Kahan compensation,
  * steps), then the scale factor at t three times and the expansion rate (Part C; 1, 1, 1, 0
- * without comoving coordinates), then the shearing box's offset and its compensation.
+ * without comoving coordinates), then the shearing box's offset and its compensation, then the
+ * hold of an adaptive mesh's refinement check (amr/flag_hold.wgsl), off.
  */
 export function clockState(c: SimConfig, time = 0, steps = 0): Float32Array<ArrayBuffer> {
   const k = cosmologyOf(c);
   const a = k ? scaleFactor(k, time) : 1;
   const shear = shearOffset(c, time);
-  return new Float32Array([0, time, 0, steps, a, a, a, k ? hubble(k, a) : 0, shear, 0]);
+  return new Float32Array([0, time, 0, steps, a, a, a, k ? hubble(k, a) : 0, shear, 0, 0]);
 }
 
 /** Then the forces on bodies (hydro/forces.ts), where a run has any. */
@@ -1576,6 +1590,7 @@ export function diagnosticsFrom(a: Float32Array, nMasses: number): Diagnostics {
     t: a[1] + a[0],
     dt: a[0],
     steps: a[3] + (a[0] > 0 ? 1 : 0),
+    held: a[10] !== 0,
     mass: r[0],
     momentum: [r[1], r[2], r[3]],
     eKin: r[4],
@@ -1733,6 +1748,8 @@ export interface Diagnostics {
   t: number;
   dt: number;
   steps: number;
+  /** The clock is held for an adaptive mesh's refinement check (amr/flag_hold.wgsl): dt = 0 is no stop. */
+  held?: boolean;
   mass: number;
   momentum: [number, number, number];
   eKin: number;

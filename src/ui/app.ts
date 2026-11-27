@@ -6433,6 +6433,8 @@ watchLoading(showLoadingMessage, () => (headless || performance.now() - lastFram
  * never fewer than two, so a step longer than all that still has the next one queued behind it.
  */
 const QUEUE_MS = 12;
+/** Besides the browser's delay in reporting work done, the time the page takes over a refinement check's answer. */
+const SPEC_MS = 1;
 const batchMs = () => Math.max(refreshMs / 2, pollMs / 4);
 const queueFull = () => queued >= 64 || (queued >= 2 && (msPerStep ? queuedSteps * msPerStep >= pollMs + QUEUE_MS : queued >= 3));
 
@@ -6445,7 +6447,9 @@ function pump() {
     // An adaptive run may take fewer steps than asked: it ends a batch at each refinement check,
     // and holds back while the flow is too far ahead of the mesh. Submit whatever it encoded
     // even so: that can include a re-mesh.
-    const taken = s.encodeSteps(enc, batch);
+    // Steps may go on behind a refinement check, held on the GPU if it re-meshes (AmrSim): as
+    // many as cover the time its answer takes to come back, and the page to act on it.
+    const taken = s.encodeSteps(enc, batch, false, msPerStep > 0 ? Math.ceil((pollMs + SPEC_MS) / msPerStep) : 2);
     if (timed) frameTiming.close(enc, taken);
     gpu.device.queue.submit([enc.finish()]);
     s.submitted();
@@ -6664,7 +6668,7 @@ function tick(now: number) {
         ...(d.magnetic ? { bMax: d.magnetic.bMax, betaMin: d.magnetic.betaMin, divB: d.magnetic.divB } : {}),
       });
       // dt = 0 after some progress means the clock reached the end time.
-      if (d.dt === 0 && d.steps > 0 && running && !finished) {
+      if (d.dt === 0 && !d.held && d.steps > 0 && running && !finished) {
         if (ckpt.on && cfg.tStop !== undefined && d.t >= cfg.tStop * (1 - 1e-5)) {
           // Held at a checkpoint: write it, and the run goes on.
           if (!ckpt.busy) saveCheckpoint(s);
@@ -6677,7 +6681,7 @@ function tick(now: number) {
       }
       // A clock held at a checkpoint reads dt = 0 (the step it is about to take) at a time
       // already shown: leave it out of the readouts and their history.
-      if (d.dt === 0 && ckpt.on && d.t < cfg.tEnd * (1 - 1e-5)) return;
+      if (d.dt === 0 && (d.held || (ckpt.on && d.t < cfg.tEnd * (1 - 1e-5)))) return;
       updateRange(d);
       showDiagnostics(d, s);
       showDensityCut();

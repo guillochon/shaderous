@@ -542,6 +542,35 @@ export class BlockTree {
   }
 
   /**
+   * What adapt() reads to decide whether it changes anything at all, on this tree and without
+   * refinement zones (tiers), for deciding that on the GPU (amr/flag_hold.wgsl): the leaves it
+   * would refine if flagged above hi (below the level limit), and the parents it would merge
+   * unless a child is "hot" (adapt's hot()), each child with what it reads of its face
+   * neighbors: a leaf's indicator, 0 for a block that is no leaf (null), nothing past the box's
+   * edge (undefined). With no refinement wanted, adapt() changes the tree exactly when some such
+   * parent has no hot child. Keep this in step with adapt().
+   */
+  adaptWatch(): { refine: Block[]; merge: { child: Block; next: (Block | null | undefined)[] }[][] } {
+    const leaves = this.leaves();
+    const refine = leaves.filter((b) => b.level < this.levelLimit);
+    const merge: { child: Block; next: (Block | null | undefined)[] }[][] = [];
+    const parents = [...new Set(leaves.map((b) => b.parent).filter((p): p is Block => !!p))];
+    for (const p of parents) {
+      if (!this.live(p) || !p.children || p.children.some((ch) => ch.children) || !this.canCoarsen(p)) continue;
+      merge.push(
+        p.children.map((child) => ({
+          child,
+          next: Array.from({ length: this.nface }, (_, f) => {
+            const nb = this.neighbor(child, f);
+            return nb.kind === 'bc' ? undefined : nb.block.children ? null : nb.block;
+          }),
+        })),
+      );
+    }
+    return { refine, merge };
+  }
+
+  /**
    * Take the steps of an earlier adapt() again (its lastSteps), on the tree as it was then: the
    * same re-mesh, decided without its indicators. For replaying a run (ui/session.ts).
    */

@@ -40,7 +40,7 @@ import { writeDrive } from '../hydro/drive';
 import { gridDims } from '../domain';
 import { sphSetup, spherical } from '../spherical';
 import { FORCE_CHANNELS, forcesOn, WallForces } from '../hydro/forces';
-import { implicitPressure, rotationOf, orbitConfig, settledOrbit, MASS_TRACK_BYTE, clockPressure, implicitBlocksUnsupported, refusal, CLOCK_BYTES, clockState, syncScale, cosmologyOf, withScale, cosmologyUnsupported, shearUnsupported, cylindrical, cylindricalUnsupported, sphericalUnsupported, symmetryUnsupported, mirrors, unfoldDiagnostics, type CellProbe, type DisplayAtlas, readTexels, readStencil, writeTracerFixed, completeMass, MassReader, MAX_MASSES, BRUSH_BYTES, DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, withForces, FORCE_FLOAT, hydroSlots, initialMasses, MASS_FLOATS, MASS_HEADER, MASS_STRIDE, MAX_SOURCES, frameTrack, followsBinary, frameZeros, FRAME_SUMS, outlineContains, packBrush, packMasses, packParams, packSources, PARAM_BYTES, readRestart, SOURCE_BYTES, type RestartState, type BrushOp, type Diagnostics, type Outline, type SimConfig, type Simulation, type SourceSpec, writeMassRadii, burnSpec, noHeat, isFieldBrush, fieldBrushSteps } from '../sim';
+import { implicitPressure, rotationOf, orbitConfig, settledOrbit, MASS_TRACK_BYTE, clockPressure, implicitBlocksUnsupported, refusal, CLOCK_BYTES, CLOCK_HOLD_BYTE, clockState, syncScale, cosmologyOf, withScale, cosmologyUnsupported, shearUnsupported, cylindrical, cylindricalUnsupported, sphericalUnsupported, symmetryUnsupported, mirrors, unfoldDiagnostics, type CellProbe, type DisplayAtlas, readTexels, readStencil, writeTracerFixed, completeMass, MassReader, MAX_MASSES, BRUSH_BYTES, DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, withForces, FORCE_FLOAT, hydroSlots, initialMasses, MASS_FLOATS, MASS_HEADER, MASS_STRIDE, MAX_SOURCES, frameTrack, followsBinary, frameZeros, FRAME_SUMS, outlineContains, packBrush, packMasses, packParams, packSources, PARAM_BYTES, readRestart, SOURCE_BYTES, type RestartState, type BrushOp, type Diagnostics, type Outline, type SimConfig, type Simulation, type SourceSpec, writeMassRadii, burnSpec, noHeat, isFieldBrush, fieldBrushSteps } from '../sim';
 import { blockTier, type Zone } from './zones';
 import { BlockTree, BS, BT_STRIDE, NG, PAD, RG_STRIDE, type Block, gridBox, type GridBox, type RegridOp, type AdaptStep } from './tree';
 import { indicator, leafState, samplesPerCell, surfaceOf, type LeafState } from './init_cpu';
@@ -60,13 +60,38 @@ import { radiationOn } from '../radiation/radiation';
 import { diffusionFlux, splitPressure } from '../radiation/init';
 
 /**
- * Steps between refinement checks, and how far the flow may run past an unanswered check.
- * Signals cross at most about a third of a cell per step, and a block is 16 cells with a
- * buffer block kept around flagged ones, so 24 steps cannot carry a feature out of its refinement.
- * A cycle of per-block timesteps is taken whole, up to 2^MAX_TIME_BINS = 32 substeps.
+ * Steps between refinement checks. Signals cross at most about a third of a cell per step, and a
+ * block is 16 cells with a buffer block kept around flagged ones, so 8 steps cannot carry a
+ * feature out of its refinement. A cycle of per-block timesteps is taken whole, up to
+ * 2^MAX_TIME_BINS = 32 substeps.
+ *
+ * A check is answered, and its re-mesh applied, before the next step is taken, whoever drives
+ * the run and however fast the GPU reads back: the run takes the same steps on the same meshes
+ * in the page, through the API and in a replay. (The flow once ran on up to 24 steps past an
+ * unanswered check, and a re-mesh landed wherever its readback happened to.)
  */
 const REGRID_EVERY = 8;
-const MAX_STEPS_AHEAD = 24;
+
+/** A step (or cycle, of `units` steps) encodeSteps() took, for taking it back if the clock held it. */
+interface PassRecord {
+  units: number;
+  /** It counted binPause down. */
+  paused: boolean;
+  /** A cycle's work, first substep and as single steps (binWork). */
+  first: number;
+  full: number;
+}
+
+/** The largest float32 at or below x: for a float32 value v, v > x exactly when v > f32Below(x). */
+function f32Below(x: number): number {
+  const f = Math.fround(x);
+  if (f <= x || !Number.isFinite(f)) return f;
+  if (f === 0) return -1.401298464324817e-45; // the float32 just below zero
+  const b = new Float32Array([f]);
+  const u = new Int32Array(b.buffer);
+  u[0] += f > 0 ? -1 : 1;
+  return b[0];
+}
 /** Most bytes read back from the GPU in one staging buffer (AmrSim.readBoxes). */
 const READ_CHUNK_BYTES = 256 * 1024 * 1024;
 /** Bytes per block of the species' face mass fluxes (amr/species.wgsl): (BS + 1)^d faces of three axes. */
@@ -375,7 +400,34 @@ export class AmrSim implements Simulation {
   // The automatic choice between cycles and single steps (see BIN_SHARE_MAX).
   private binStaging: GPUBuffer;
   private binPollBusy = false;
+  /** The read of a poll in flight (pollBins): the next poll waits on it, if it must. */
+  private binPollWait: Promise<void> | null = null;
   private wantBinPoll: { first: number; full: number } | null = null;
+  /**
+   * A poll of the cycles' saving is due: taken as the next call starts, where the last poll's
+   * answer is taken up (pollBins). Polls come with refinement checks, at the first after every
+   * BIN_POLL_CYCLES cycles, so that they too fall at the same step in every run.
+   */
+  private binPollDue = false;
+  /**
+   * Steps queued behind a refinement check before its answer came back (encodeSteps' speculate):
+   * flag_hold.wgsl decides on the GPU whether the check may re-mesh, and if so holds the clock.
+   * spec holds its buffers and passes; null where held steps would not be exact no-ops, or the
+   * mesh's own checks are off (see specAllowed).
+   */
+  private spec: { u: GPUBuffer; ref: GPUBuffer; cand: GPUBuffer; diff: GPUBuffer; gCmp: GPUBindGroup; gHold: GPUBindGroup; pCmp: GPUComputePipeline; pHold: GPUComputePipeline } | null = null;
+  /** What flag_hold.wgsl reads of the mesh (BlockTree.adaptWatch), packed, and the mesh it is of (treeVersion). */
+  private specTables: { ref: Uint32Array; cand: Int32Array; nCand: number; version: number } | null = null;
+  /** Counts the meshes the run has had (applyRegrid, reset). */
+  private treeVersion = 0;
+  /** The check encoded and not yet read: its thresholds and the tables it was decided with. */
+  private specCheck: { hi: number; lo: number; tables: { ref: Uint32Array; cand: Int32Array; nCand: number } } | null = null;
+  /** The check in flight was compared on the GPU: steps may go on behind it. */
+  private specLive = false;
+  /** The steps taken behind the check in flight, taken back if it held the clock. */
+  private specPasses: PassRecord[] = [];
+  /** The last check held the clock: let it go as the next call starts. */
+  private specRelease = false;
   private binSeen = { updates: 0, single: 0 };
   private binEpoch = 0;
   private cyclesSincePoll = 0;
@@ -422,6 +474,16 @@ export class AmrSim implements Simulation {
   private nAll = 0;
   private nLeaf = 0;
   private stepsSinceFlag = 0;
+  /**
+   * The steps the last encodeSteps() call encoded, in order: each a single step or a cycle (its
+   * length in steps), and whether it counted binPause down. held() takes back those the clock held.
+   */
+  private lastPasses: PassRecord[] = [];
+  /**
+   * A refinement check fell due on a step the clock may have held (encodeSteps' mayHold): it is
+   * encoded as the next call starts, once held() has said whether that step was taken at all.
+   */
+  private flagDue = false;
   private wantMap = false;
   private flagInFlight = false;
   private flagWait: Promise<void> | null = null;
@@ -878,6 +940,21 @@ export class AmrSim implements Simulation {
       0: sim.params, 1: v(flagW[0]), 2: v(flagW[1]), 3: sim.flags, 4: sim.bh, 30: sim.bt, 31: sim.listLeaf,
       ...((sim.speciesX ? { 5: v(sim.speciesX) } : {}) as Record<number, GPUTextureView>),
     });
+    if (sim.specAllowed) {
+      const [pCmp, pHold] = await Promise.all([
+        computePipeline(d, assemble('amr/flag_hold.wgsl'), 'amr check decide', { MODE: 0, NCH: 1 << cfg.ndim, NFACE: 2 * cfg.ndim }),
+        computePipeline(d, assemble('amr/flag_hold.wgsl'), 'amr check hold', { MODE: 1, NCH: 1 << cfg.ndim, NFACE: 2 * cfg.ndim }),
+      ]);
+      const u = d.createBuffer({ label: 'amr check hold', size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+      const ref = d.createBuffer({ label: 'amr check refinable', size: sim.cap * 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+      const cand = d.createBuffer({ label: 'amr check mergeable', size: sim.cap * (1 + 2 * cfg.ndim) * 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+      const diff = d.createBuffer({ label: 'amr check re-meshes', size: 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+      sim.spec = {
+        u, ref, cand, diff, pCmp, pHold,
+        gCmp: bindGroup(d, pCmp, { 1: sim.flags, 2: ref, 3: diff, 4: sim.clock, 5: u, 6: cand }),
+        gHold: bindGroup(d, pHold, { 1: sim.flags, 2: ref, 3: diff, 4: sim.clock, 5: u, 6: cand }),
+      };
+    }
     sim.gBhDrift = bindGroup(d, sim.pBhDrift, { 0: sim.params, 1: sim.clock, 2: sim.bh });
     if (followsBinary(cfg)) {
       sim.redFrame = await Reducer.create(
@@ -1373,7 +1450,7 @@ export class AmrSim implements Simulation {
       bindGroup(d, this.pBinsRelax, { 0: this.params, 1: A, 2: B, 28: idx, 30: this.bt, 31: this.listAll }),
     ];
     this.gBinsLists = bindGroup(d, this.pBinsLists, { 0: this.params, 1: this.listAct, 2: this.listUpd, 3: this.binCnt, 4: this.listEnd, 5: this.listDep, 28: idx, 29: A, 30: this.bt, 31: this.listAll });
-    this.gBinsArgs = bindGroup(d, this.pBinsArgs, { 0: this.params, 1: this.listAct, 2: this.listUpd, 3: this.binCnt, 4: this.binArgs, 5: this.listEnd, 6: this.listDep });
+    this.gBinsArgs = bindGroup(d, this.pBinsArgs, { 0: this.params, 1: this.listAct, 2: this.listUpd, 3: this.binCnt, 4: this.binArgs, 5: this.listEnd, 6: this.listDep, 7: this.clock });
     this.binsPrimed = null;
     // What was measured with other bins says nothing about these.
     this.binPause = BIN_START_STEPS;
@@ -1943,6 +2020,12 @@ export class AmrSim implements Simulation {
     }
     this.pending = null;
     this.stepsSinceFlag = 0;
+    this.flagDue = false;
+    this.binPollDue = false;
+    this.lastPasses = [];
+    this.treeVersion++;
+    this.specPasses = [];
+    this.specRelease = false;
     this.regrids = 0;
     this.binsPrimed = null;
     this.binCycles = this.binFirstWork = this.binFullWork = 0;
@@ -2523,6 +2606,7 @@ export class AmrSim implements Simulation {
   }
 
   private applyRegrid(enc: GPUCommandEncoder) {
+    this.treeVersion++;
     const plan = this.pending!;
     this.pending = null;
     this.lagFresh = true;
@@ -2582,16 +2666,53 @@ export class AmrSim implements Simulation {
    * The encoder must be submitted, and submitted() called, before the next call: a re-mesh
    * replaces the tables that earlier passes in an unsubmitted encoder would still expect.
    */
-  encodeSteps(enc: GPUCommandEncoder, count: number): number {
+  encodeSteps(enc: GPUCommandEncoder, count: number, mayHold = false, speculate = 0): number {
     if (this.cfg.viewOnly) return 0; // a checkpoint to look at: the step's own atlases are not there
     if (this.settling || this.compiling) return 0; // a star is still being settled, or the update pass compiling
-    if (this.pending) this.applyRegrid(enc);
-    if (this.pendingBinPause !== null) {
-      // At a call's start, as a re-mesh is: the session log stamps it with the steps taken so far.
-      this.binPause = this.pendingBinPause;
-      this.pendingBinPause = null;
-      this.onBins?.(this.binPause);
+    this.lastPasses = [];
+    // A check put off at the end of the last call (mayHold, or steps queued behind the last check
+    // as far as the next), still due now that its answer is in and the steps the clock held are
+    // taken back: on the state the last step taken left, as it would have been encoded right
+    // after that step.
+    let checked = false;
+    let pre: GPUCommandEncoder | null = null;
+    if (this.flagDue && !this.flagInFlight) {
+      this.flagDue = false;
+      // Queuing steps behind it: in a submission of its own, so that its answer comes back while
+      // they run. Otherwise the caller waits for its answer (stepsResume()) before the next step.
+      if (speculate > 0 && this.spec && this.flagReady) pre = this.device.createCommandEncoder();
+      checked = this.flagReady;
     }
+    if (this.specRelease) {
+      // The last check held the clock (amr/flag_hold.wgsl): let it go, before anything else.
+      (pre ?? enc).clearBuffer(this.clock, CLOCK_HOLD_BYTE, 4);
+      this.specRelease = false;
+    }
+    if (checked) this.encodeFlags(pre ?? enc);
+    if (pre) {
+      this.device.queue.submit([pre.finish()]);
+      this.readFlags();
+    }
+    // A poll of the cycles' saving, with the check it comes with (binPollDue): the last poll's
+    // answer is taken up here, where the session log stamps it with the steps taken so far, and
+    // the next copied. Should the last be unanswered yet, the caller waits for it.
+    const poll = (this.binPollDue || (checked && this.builtBins > 0)) && this.cyclesSincePoll >= BIN_POLL_CYCLES;
+    this.binPollDue = false;
+    if (poll) {
+      if (this.binPollBusy || this.wantBinPoll) {
+        this.binPollDue = true;
+        return 0;
+      }
+      if (this.pendingBinPause !== null) {
+        this.binPause = this.pendingBinPause;
+        this.pendingBinPause = null;
+        this.onBins?.(this.binPause);
+      }
+      if (this.binPause === 0) this.encodeBinPoll(enc);
+      else this.cyclesSincePoll = 0; // paused: the next poll is of the cycles after
+    }
+    if (checked && !pre) return 0;
+    if (this.pending) this.applyRegrid(enc);
     if (this.dtStale) {
       // The block list changed: drop timestep records of workgroups it no longer covers.
       enc.clearBuffer(this.redDt.first);
@@ -2606,21 +2727,45 @@ export class AmrSim implements Simulation {
       // longer than that goes on in cycles (decided once, at the call's start, a single call of
       // many steps took none: the validation's runs with time bins had none since that start).
       cycle = this.binsLive ? 1 << this.builtBins : 0;
+      // Not a step past an unanswered refinement check: its re-mesh comes before the next step
+      // (REGRID_EVERY), so the caller waits on it. Unless the GPU decides that (speculate): then
+      // up to `speculate` steps go on behind it (never past the next check, which waits), and
+      // if it re-meshes, the clock holds them all (amr/flag_hold.wgsl) and readFlags() takes them
+      // back. They need only cover the time its answer takes to come back: the more there are,
+      // the more a re-mesh throws away.
+      // (Not into a change between cycles and single steps, which primes the bins.)
+      const behind = this.levels > 0 && (this.flagInFlight || this.wantMap);
+      if (behind) {
+        const go = this.specLive && !this.wantMap && this.stepsSinceFlag < Math.min(REGRID_EVERY, speculate) && (this.builtBins === 0 || this.binsPrimed === this.binsLive);
+        if (!go) {
+          if (this.flagInFlight && this.stepsSinceFlag >= REGRID_EVERY) this.flagDue = true;
+          break;
+        }
+      }
       this.primeBins(enc);
-      if (this.levels > 0 && (this.flagInFlight || this.wantMap) && this.stepsSinceFlag >= MAX_STEPS_AHEAD) break;
       if (cycle) {
         // Whole cycles only: the mesh, the display and the diagnostics need every block at
         // the same time. May run past `count`.
         this.encodeCycle(enc);
         this.cyclesSincePoll++;
         this.stepsSinceFlag += cycle;
-        if (this.encodeFlags(enc)) {
+        const rec = { units: cycle, paused: false, first: this.nLeaf, full: this.nLeaf << this.builtBins };
+        this.lastPasses.push(rec);
+        if (behind) this.specPasses.push(rec);
+        // Without checks of the mesh's own, polls go by the count of cycles alone.
+        const polled = !(this.levels > 0 && this.autoRegrid) && this.cyclesSincePoll >= BIN_POLL_CYCLES;
+        if (polled) this.binPollDue = true;
+        if (this.flagAfterStep(enc, mayHold) || polled) {
           done += cycle;
           break;
         }
         continue;
       }
-      if (this.binPause > 0) this.binPause--;
+      const paused = this.binPause > 0;
+      if (paused) this.binPause--;
+      const rec = { units: 1, paused, first: 0, full: 0 };
+      this.lastPasses.push(rec);
+      if (behind) this.specPasses.push(rec);
       const p = this.cur;
       if (this.mhd) {
         const mp = beginPass(enc);
@@ -2656,7 +2801,7 @@ export class AmrSim implements Simulation {
         }
         this.encodeBurn(enc);
         this.stepsSinceFlag++;
-        if (this.encodeFlags(enc)) {
+        if (this.flagAfterStep(enc, mayHold)) {
           done++;
           break;
         }
@@ -2753,18 +2898,54 @@ export class AmrSim implements Simulation {
       syncScale(enc, this.cfg, this.clock, this.params, this.bh);
       this.encodeBurn(enc);
       this.stepsSinceFlag++;
-      if (this.encodeFlags(enc)) {
+      if (this.flagAfterStep(enc, mayHold)) {
         done++;
         break;
       }
     }
-    if (cycle && this.cyclesSincePoll >= BIN_POLL_CYCLES && !this.binPollBusy && !this.wantBinPoll) {
-      // How much work the last cycles saved: read back without blocking (see submitted()).
-      enc.copyBufferToBuffer(this.binArgs, 0, this.binStaging, 0, BIN_ARGS_BYTES);
-      this.wantBinPoll = { first: this.binFirstWork, full: this.binFullWork };
-      this.cyclesSincePoll = 0;
-    }
     return done;
+  }
+
+  /**
+   * Copy the block-update totals for a poll of how much work the cycles saved (pollBins, from
+   * submitted()). Its answer is taken up at the next poll, where encodeSteps() waits for it if it
+   * must, so that it lands at the same step in every run however fast the GPU reads back.
+   */
+  private encodeBinPoll(enc: GPUCommandEncoder) {
+    enc.copyBufferToBuffer(this.binArgs, 0, this.binStaging, 0, BIN_ARGS_BYTES);
+    this.wantBinPoll = { first: this.binFirstWork, full: this.binFullWork };
+    this.cyclesSincePoll = 0;
+  }
+
+  /**
+   * The last `units` steps encodeSteps() encoded were held by the clock (a movie's frame time, a
+   * stop: hydro/clock.wgsl) and did nothing: they count for nothing, so a recorded run checks its
+   * refinement and starts its cycles at the steps the unrecorded one does. Held steps are only ever
+   * the last of a call (once held, the clock stays held), and are read from its clock afterwards.
+   */
+  held(units: number) {
+    for (let i = this.lastPasses.length - 1; i >= 0 && units > 0; i--) {
+      units -= this.lastPasses[i].units;
+      this.takeBack(this.lastPasses[i]);
+    }
+    this.lastPasses = [];
+  }
+
+  /**
+   * After a step: a refinement check, if one is due (encodeFlags), and whether it ends the batch.
+   * Where the clock may hold (mayHold), the step just encoded may be one it holds, taken at dt = 0,
+   * and a check after it would come early. The batch ends there all the same, and the check is
+   * left for the next call, which takes it once held() has had its say.
+   */
+  private flagAfterStep(enc: GPUCommandEncoder, mayHold: boolean): boolean {
+    if (!this.flagReady) return false;
+    if (mayHold) this.flagDue = true;
+    else {
+      this.encodeFlags(enc);
+      // A poll comes with the check after every BIN_POLL_CYCLES cycles (binPollDue).
+      if (this.builtBins > 0 && this.cyclesSincePoll >= BIN_POLL_CYCLES) this.binPollDue = true;
+    }
+    return true;
   }
 
   /** Read the block-update totals copied by encodeSteps(), and pause the cycles if they save too little. */
@@ -2774,7 +2955,7 @@ export class AmrSim implements Simulation {
     this.wantBinPoll = null;
     this.binPollBusy = true;
     const epoch = this.binEpoch;
-    this.binStaging
+    this.binPollWait = this.binStaging
       .mapAsync(GPUMapMode.READ)
       .then(() => {
         const later = new Uint32Array(this.binStaging.getMappedRange().slice(0))[BIN_TOTALS];
@@ -2788,7 +2969,7 @@ export class AmrSim implements Simulation {
         this.binShare = du / ds;
         if (this.cfg.timeBinsAlways || !this.autoBins) return;
         if (this.binShare > (this.fieldOn ? BIN_SHARE_MAX.field : BIN_SHARE_MAX.hydro)) {
-          // Taken up as the next batch of steps starts (encodeSteps), where it is logged.
+          // Taken up at the next poll (encodeSteps), where it is logged.
           this.pendingBinPause = this.binPauseNext;
           this.binPauseNext = Math.min(BIN_PAUSE_MAX, 2 * this.binPauseNext);
         } else {
@@ -2801,26 +2982,131 @@ export class AmrSim implements Simulation {
       });
   }
 
+  private get flagReady(): boolean {
+    return this.levels > 0 && this.autoRegrid && !this.flagInFlight && !this.wantMap && this.stepsSinceFlag >= REGRID_EVERY;
+  }
   /**
-   * Every few steps, measure the refinement indicator from the latest primitives. Returns
-   * whether a check was encoded: encodeSteps() then ends
-   * the batch, so the check can be read back as soon as it is done rather than after steps
-   * queued behind it in the same submission: the flow may only run MAX_STEPS_AHEAD past it.
+   * Every REGRID_EVERY steps, measure the refinement indicator of every leaf. Returns whether a
+   * check was encoded: the batch then ends, so the check is read back as soon as it is done, and
+   * its re-mesh is applied before the next step (encodeSteps).
    */
   private encodeFlags(enc: GPUCommandEncoder): boolean {
-    if (this.levels === 0 || !this.autoRegrid || this.flagInFlight || this.wantMap || this.stepsSinceFlag < REGRID_EVERY) return false;
+    if (!this.flagReady) return false;
     enc.clearBuffer(this.flags);
     const fp = beginPass(enc);
-    // With a magnetic field: the indicator reads the primitives of the state as it is now.
+    // The indicator reads the primitives of the state as it is now, assembled afresh, not those
+    // the last step assembled as it started: a step the clock held (a movie's frame, steps behind
+    // a check) assembles the state it leaves, and a check after one read other primitives than
+    // the unrecorded run's. A re-mesh the check decides then takes its slopes of prolongation
+    // from these too (amr/regrid.wgsl), held steps or not.
     if (this.mhd) this.mhd.encodeAssembly(fp, this.cur, () => this.flat(fp, this.nLeaf, NG));
+    else {
+      fp.setPipeline(this.pAssemble);
+      fp.setBindGroup(0, this.assembleGroup(this.cur));
+      this.flat(fp, this.nAll, NG);
+      if (this.speciesGroups) {
+        // The species' fractions with ghosts, for their part of the indicator.
+        fp.setPipeline(this.pSpecies[0]);
+        fp.setBindGroup(0, this.gSpecies[0][this.cur][this.speciesCur]);
+        this.flat(fp, this.nLeaf, NG);
+      }
+    }
     fp.setPipeline(this.pFlag);
     fp.setBindGroup(0, this.gFlag);
     this.interior(fp, this.nLeaf);
     fp.end();
     enc.copyBufferToBuffer(this.flags, 0, this.flagStaging, 0, this.cap * 4);
+    this.specCheck = null;
+    if (this.spec && this.autoRegrid) {
+      // Whether its answer will re-mesh, on the GPU at once (amr/flag_hold.wgsl).
+      const t = this.adaptWatch();
+      const hi = f32Below(this.cfg.refineHi);
+      const lo = f32Below(this.cfg.refineLo);
+      const u = new ArrayBuffer(16);
+      new Float32Array(u, 0, 2).set([hi, lo]);
+      new Uint32Array(u, 8, 2).set([t.ref.length, t.nCand]);
+      this.device.queue.writeBuffer(this.spec.u, 0, u);
+      enc.clearBuffer(this.spec.diff);
+      const hp = beginPass(enc);
+      hp.setPipeline(this.spec.pCmp);
+      hp.setBindGroup(0, this.spec.gCmp);
+      if (t.ref.length + t.nCand) hp.dispatchWorkgroups(Math.ceil((t.ref.length + t.nCand) / 64));
+      hp.setPipeline(this.spec.pHold);
+      hp.setBindGroup(0, this.spec.gHold);
+      hp.dispatchWorkgroups(1);
+      hp.end();
+      this.specCheck = { hi, lo, tables: t };
+    }
     this.wantMap = true;
     this.stepsSinceFlag = 0;
     return true;
+  }
+
+  /**
+   * Steps may be queued behind a refinement check before its answer (encodeSteps' speculate)
+   * where BlockTree.adapt reads indicators only as flag_hold.wgsl classes them (no obstacles, no
+   * refinement zones) and where a step the clock holds changes nothing at all: none of gravity,
+   * point masses, a magnetic field, radiation, implicit pressure, species or burning, whose passes
+   * still move on (a potential's solve, a sweep) at dt = 0.
+   */
+  private get specAllowed(): boolean {
+    return this.levels > 0 && !this.cfg.viewOnly && !this.bands && !this.zoneList().length && !this.fieldOn && !this.mhd && !this.rad && !this.prs && !this.burn && this.speciesGroups === 0;
+  }
+
+  /** BlockTree.adaptWatch of the mesh as it is, packed for flag_hold.wgsl and uploaded: once a mesh. */
+  private adaptWatch(): { ref: Uint32Array; cand: Int32Array; nCand: number } {
+    if (this.specTables?.version === this.treeVersion) return this.specTables;
+    const w = this.tree.adaptWatch();
+    const nface = 2 * this.cfg.ndim;
+    const ref = new Uint32Array(w.refine.map((b) => b.slot));
+    const cand = new Int32Array(w.merge.length * (1 << this.cfg.ndim) * (1 + nface));
+    let o = 0;
+    for (const kids of w.merge) {
+      for (const { child, next } of kids) {
+        cand[o++] = child.slot;
+        for (const nb of next) cand[o++] = nb === undefined ? -1 : nb === null ? -2 : nb.slot;
+      }
+    }
+    if (ref.length) this.device.queue.writeBuffer(this.spec!.ref, 0, ref);
+    if (cand.length) this.device.queue.writeBuffer(this.spec!.cand, 0, cand);
+    this.specTables = { ref, cand, nCand: w.merge.length, version: this.treeVersion };
+    return this.specTables;
+  }
+
+  /** flag_hold.wgsl's decision, made again from the indicators read back: whether it held the clock. */
+  private adaptWould(ind: Float32Array, sc: NonNullable<AmrSim['specCheck']>): boolean {
+    const x = (slot: number) => (ind[slot] === 0 ? -1 : ind[slot]);
+    for (const slot of sc.tables.ref) if (x(slot) > sc.hi) return true;
+    const nch = 1 << this.cfg.ndim;
+    const nface = 2 * this.cfg.ndim;
+    const c = sc.tables.cand;
+    cands: for (let j = 0; j < sc.tables.nCand; j++) {
+      for (let k = 0; k < nch; k++) {
+        const o = (j * nch + k) * (1 + nface);
+        const v = x(c[o]);
+        if (v > sc.lo) continue cands;
+        if (v < 0) continue;
+        for (let f = 0; f < nface; f++) {
+          const nb = c[o + 1 + f];
+          if (nb !== -1 && (nb === -2 ? 0 : x(nb)) > sc.hi) continue cands;
+        }
+      }
+      return true;
+    }
+    return false;
+  }
+
+  /** Take back the bookkeeping of a step the clock held (held(), and steps behind a check that held it). */
+  private takeBack(p: PassRecord) {
+    this.stepsSinceFlag = Math.max(0, this.stepsSinceFlag - p.units);
+    if (p.paused) this.binPause++;
+    if (p.full) {
+      // A held cycle: no work done, nor saved (the GPU's totals leave it out: amr/bins_args.wgsl).
+      this.cyclesSincePoll = Math.max(0, this.cyclesSincePoll - 1);
+      this.binCycles--;
+      this.binFirstWork -= p.first;
+      this.binFullWork -= p.full;
+    }
   }
 
   /** Whether the edge of an outline passes through a block: some of the block inside, some not. */
@@ -2970,6 +3256,7 @@ export class AmrSim implements Simulation {
     } finally {
       this.flagInFlight = false;
       this.stepsSinceFlag = 0;
+      this.flagDue = false;
     }
   }
 
@@ -3191,27 +3478,46 @@ export class AmrSim implements Simulation {
   submitted() {
     this.burn?.poll?.();
     this.pollBins();
+    this.readFlags();
+  }
+
+  /** Read back the refinement check just submitted, if any, and decide its re-mesh. */
+  private readFlags() {
     if (!this.wantMap) return;
     this.wantMap = false;
     this.flagInFlight = true;
     const tree = this.tree;
     const epoch = this.meshEpoch;
+    const sc = this.specCheck;
+    this.specCheck = null;
+    this.specLive = !!sc;
     this.flagWait = this.flagStaging
       .mapAsync(GPUMapMode.READ)
       .then(() => {
         const ind = new Float32Array(this.flagStaging.getMappedRange().slice(0));
         this.flagStaging.unmap();
+        // What flag_hold.wgsl decided, decided again: whether the clock is held, and so the
+        // steps queued behind the check did nothing.
+        const held = !!sc && this.adaptWould(ind, sc);
+        if (held) {
+          this.specRelease = true;
+          if (tree === this.tree) for (const p of this.specPasses) this.takeBack(p);
+        }
+        this.specPasses = [];
         if (tree !== this.tree || epoch !== this.meshEpoch) return; // the run was reset, or re-meshed by hand, meanwhile
         this.lastIndicators = ind;
         const leaves = tree.leaves();
         for (const b of leaves) this.indicatorOf.set(b, ind[b.slot]);
         if (!this.autoRegrid) return; // a check already in flight when a replay took over
         // Exactly 0: no gas in the block, only the inside of an obstacle (see amr/flag.wgsl).
-        const ops = tree.adapt((b) => this.withBodies(b, ind[b.slot] === 0 ? -1 : ind[b.slot]), this.cfg.refineHi, this.cfg.refineLo, this.tier);
+        const indicator = (b: Block) => this.withBodies(b, ind[b.slot] === 0 ? -1 : ind[b.slot]);
+        const ops = tree.adapt(indicator, this.cfg.refineHi, this.cfg.refineLo, this.tier);
         if (ops) this.pending = { ops, steps: tree.lastSteps };
+        if (ops && sc && !held) console.error('amr: a refinement check re-meshed that flag_hold.wgsl let the steps behind it go on past');
       })
       .finally(() => {
         this.flagInFlight = false;
+        this.specLive = false;
       });
   }
 
@@ -3268,7 +3574,10 @@ export class AmrSim implements Simulation {
 
   stepsResume(): Promise<void> | null {
     if (this.compiling) return this.compiled.catch(() => {});
-    return this.flagInFlight && this.flagWait ? this.flagWait.catch(() => {}) : null;
+    const waits: Promise<void>[] = [];
+    if (this.flagInFlight && this.flagWait) waits.push(this.flagWait.catch(() => {}));
+    if (this.binPollBusy && this.binPollWait) waits.push(this.binPollWait);
+    return waits.length ? Promise.all(waits).then(() => {}) : null;
   }
 
   /**
@@ -3299,7 +3608,7 @@ export class AmrSim implements Simulation {
     let left = count;
     while (left > 0) {
       left -= this.step(Math.min(left, REGRID_EVERY));
-      if (this.flagWait) await this.flagWait;
+      await this.stepsResume();
     }
   }
 
@@ -3413,7 +3722,7 @@ export class AmrSim implements Simulation {
         await buf.mapAsync(GPUMapMode.READ);
         const c = new Float32Array(buf.getMappedRange().slice(0));
         buf.unmap();
-        if (this.flagWait) await this.flagWait;
+        await this.stepsResume();
         const [dt, t] = c;
         const steps = c[3];
         if (!(dt === dt) || !(t === t)) throw new Error(`clock is NaN after ${steps} steps`);

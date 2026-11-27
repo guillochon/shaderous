@@ -130,6 +130,11 @@ fn main() {
   if (P.refine.z - clock.t < 0.5 * CYCLE * dt) {
     dt = 0.0;
   }
+  // Held for an adaptive mesh's refinement check whose answer may re-mesh (amr/flag_hold.wgsl):
+  // the steps the page queued behind it do nothing until the re-mesh is in.
+  if (clock.hold != 0.0) {
+    dt = 0.0;
+  }
   clock.dt = dt;
   // The scale factor half way through the step and at its end, and the expansion rate half way.
   if (cosmo_on()) {

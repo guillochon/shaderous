@@ -389,11 +389,25 @@ consecutive blocks. Together with predicting only leaves, this made a 2D Kelvin-
 ### Regridding
 
 Every 8 steps (`REGRID_EVERY`) a pass reduces the refinement indicator per block into a
-buffer with atomic max (`amr/flag.wgsl`). The CPU reads it back without blocking. The flow may
-run at most 24 steps past an unanswered check: a signal crosses at most about a third of a cell
-per step, and flagged blocks keep a buffer block around them, so no feature can leave its
-refinement in that time. The CPU then adapts the tree, and one pass (`amr/regrid.wgsl`) fills
-the new leaves into the other state texture by copying, prolonging or restricting. When a
+buffer with atomic max (`amr/flag.wgsl`), from primitives assembled afresh from the state as it
+is. The CPU reads it back without blocking, adapts the tree, and one pass (`amr/regrid.wgsl`)
+fills the new leaves into the other state texture by copying, prolonging or restricting. A
+signal crosses at most about a third of a cell per step, and flagged blocks keep a buffer block
+around them, so no feature can leave its refinement between checks.
+
+A check's re-mesh is applied before the next step, whoever drives the run, so the run takes the
+same steps on the same meshes in the page, through the API and in a recorded movie (issue 25).
+The API and the validation wait for each answer. The page's own loop queues a few steps behind
+a check instead, as many as cover the readback: `amr/flag_hold.wgsl` decides on the GPU, right
+after the check, whether `BlockTree.adapt` will change the mesh (from the leaves it could refine
+and the parents it could merge, `BlockTree.adaptWatch`), and if so holds the clock (`Clock.hold`,
+`hydro/clock.wgsl`), so those steps do nothing; the CPU makes the same decision from the
+readback and takes their bookkeeping back. It does so only where a held step is an exact no-op
+(no gravity, point masses, magnetic field, radiation, implicit pressure, species or burning) and
+`adapt` reads indicators only through its thresholds (no obstacles, no refinement zones);
+elsewhere the page waits too. Steps a movie's frame time holds are taken back the same way
+(`AmrSim.held`). The poll of how much work per-block timesteps save comes with a check, every
+four cycles, and its answer is taken up at the next poll. When a
 preset needs every block above a density at the finest level (the white dwarfs), that is
 applied during the first construction too.
 

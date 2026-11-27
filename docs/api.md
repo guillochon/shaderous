@@ -885,9 +885,10 @@ logged. A log starts over when the run does (a load, Reset).
 Runs a session log again. It loads the setup the log started from, steps to each action, and
 applies it. Then, with `untilSteps`, it runs on to that many steps. The adaptive mesh makes
 none of its own refinement checks meanwhile. Instead it re-meshes where the log says, taking
-the steps the log kept. That is what makes the replay exact: the step a live re-mesh lands
-on depends on when its check was read back from the GPU. Per-block timesteps likewise pause
-their cycles where the log says, not where a read-back of their saving would. (Logs of the first version kept every
+the steps the log kept, so a replay needs no indicators and reaches the logged run's meshes
+even where its pointer edits changed the flow. (A live run's re-meshes no longer depend on when
+its checks are read back from the GPU: each is applied before the next step.) Per-block
+timesteps likewise pause their cycles where the log says. (Logs of the first version kept every
 leaf's refinement indicator for each re-mesh instead, about 30 kB each; they still replay.) GPU runs repeat to the bit on the same
 machine and browser, so the replay reaches the state the logged run reached. `stopped` says why
 it ended early, if the run went another way, for example by reaching its end time before an

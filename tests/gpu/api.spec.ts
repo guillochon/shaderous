@@ -549,8 +549,32 @@ test('records a movie: an MP4 with the frames and size asked for, and overlays',
 test('a movie with a time cadence leaves the run exactly as it would have been', async ({ page }) => {
   await page.goto('/?headless=1');
   await page.evaluate(() => (window as any).shaderous.ready);
-  for (const setup of [{ problem: 'sedov', dim: 2, n: 128 }, { problem: 'sedov', dim: 2, n: 64, amr: 2, tbins: 2 }]) {
+  // The adaptive mesh's refinement checks, as a digest of the indicators each read back: the held
+  // step at each frame time must not move them (issue 25), even where the fields still agree.
+  const watchChecks = () =>
+    page.evaluate(() => {
+      const s = (window as any).shaderousApp.sim;
+      const log: number[] = ((window as any).__checks = []);
+      let v = s.lastIndicators;
+      Object.defineProperty(s, 'lastIndicators', {
+        configurable: true,
+        get: () => v,
+        set: (x: Float32Array) => {
+          v = x;
+          let h = 0;
+          for (let i = 0; i < x.length; i++) h = (h * 31 + Math.round(x[i] * 1e6)) % 1e9;
+          log.push(h);
+        },
+      });
+    });
+  const checks = () => page.evaluate(() => [...(window as any).__checks] as number[]);
+  for (const setup of [
+    { problem: 'sedov', dim: 2, n: 128 },
+    { problem: 'sedov', dim: 2, n: 64, amr: 2, tbins: 2 },
+    { problem: 'sedov', dim: 2, n: 64, amr: 2 },
+  ]) {
     await call(page, 'load', setup);
+    await watchChecks();
     const r = await call(page, 'record', { dt: 2e-4, frames: 25, width: 320, height: 320, download: false });
     expect(r.frames).toBe(25);
     // A frame at the step boundary nearest each multiple of dt: never more frames than steps,
@@ -561,15 +585,82 @@ test('a movie with a time cadence leaves the run exactly as it would have been',
     await call(page, 'step', 20);
     const rec = await call(page, 'slice', { variable: 'press', res: 128 });
     const recState = await call(page, 'state');
+    const recChecks = await checks();
+    // Per-block timesteps: a held cycle does no work, nor saves any.
+    const work = () => page.evaluate(() => (window as any).shaderousApp.sim.binWork?.() ?? null);
+    const recWork = await work();
 
     await call(page, 'load', setup);
+    await watchChecks();
     await call(page, 'step', r.steps + 20);
     const plain = await call(page, 'slice', { variable: 'press', res: 128 });
     const plainState = await call(page, 'state');
     expect(recState.steps).toBe(plainState.steps);
     expect(recState.t).toBe(plainState.t);
+    if (setup.amr) expect(recChecks.length).toBeGreaterThan(10);
+    expect(recChecks).toEqual(await checks());
+    expect(recWork).toEqual(await work());
     expect(rec.values).toEqual(plain.values);
   }
+});
+
+test("the page's own loop takes an adaptive run's steps on the meshes the API does", async ({ page }) => {
+  // The page queues steps behind a refinement check before its answer is in, held on the GPU
+  // when it re-meshes (amr/flag_hold.wgsl), and takes up the cycles' polls a poll late: the run
+  // is the API's, step for step, whenever the readbacks land (issue 25).
+  const errors: string[] = [];
+  page.on('console', (m) => void (m.type() === 'error' && errors.push(m.text())));
+  // The page itself (a headless page never plays on its own).
+  await page.goto('/?problem=sedov&dim=2&n=256&amr=3&tbins=2&tend=inf');
+  await page.evaluate(() => (window as any).shaderous.ready);
+  const setup = { problem: 'sedov', dim: 2, n: 256, amr: 3, tbins: 2, tend: 'inf' };
+  const watch = () =>
+    page.evaluate(() => {
+      const s = (window as any).shaderousApp.sim;
+      const log: number[] = ((window as any).__checks = []);
+      let v = s.lastIndicators;
+      Object.defineProperty(s, 'lastIndicators', {
+        configurable: true,
+        get: () => v,
+        set: (x: Float32Array) => {
+          v = x;
+          let h = 0;
+          for (let i = 0; i < x.length; i++) h = (h * 31 + Math.round(x[i] * 1e6)) % 1e9;
+          log.push(h);
+        },
+      });
+    });
+  // (Once the check in flight, if any, is read.)
+  const checks = () =>
+    page.evaluate(async () => {
+      await (window as any).shaderousApp.sim.stepsResume();
+      return [...(window as any).__checks] as number[];
+    });
+  const regrids = () => page.evaluate(() => (window as any).shaderousApp.sim.regrids as number);
+  await call(page, 'load', setup);
+  await watch();
+  await call(page, 'play');
+  // Past several re-meshes and a pause of the cycles.
+  await expect.poll(async () => (await call(page, 'state')).steps, { timeout: 120_000 }).toBeGreaterThan(1200);
+  await call(page, 'pause');
+  // A step more through the API: a check the page left due as it paused is taken, as the API's
+  // own run takes it.
+  await call(page, 'step', 1);
+  const playedChecks = await checks();
+  const played = await call(page, 'state');
+  const playedRegrids = await regrids();
+  const playedSlice = await call(page, 'slice', { variable: 'rho', res: 128 });
+
+  await call(page, 'load', setup);
+  await watch();
+  await call(page, 'step', played.steps);
+  const apiChecks = await checks();
+  expect((await call(page, 'state')).t).toBe(played.t);
+  expect(playedRegrids).toBeGreaterThan(5);
+  expect(await regrids()).toBe(playedRegrids);
+  expect(playedChecks).toEqual(apiChecks);
+  expect(playedSlice.values).toEqual((await call(page, 'slice', { variable: 'rho', res: 128 })).values);
+  expect(errors.filter((e) => e.includes('amr:'))).toEqual([]);
 });
 
 test('checkpoints are written while a movie records, and while the API steps', async ({ page }) => {
