@@ -29,6 +29,13 @@ var<private> g_pgrad: vec3<f32>;
 // cell's reference density and pressure. The half step advects the reference's gradients too,
 // and its gravity acts on the deviation of the density alone, the reference being balanced.
 var<private> g_rds: vec3<f32> = vec3<f32>(0.0);
+// And the references of its lower and upper neighbors along each axis, as (density, pressure),
+// for the density reconstructed along the adiabat (hydro/q.wgsl g_ql, g_qr).
+// (Components per axis, not arrays: a private array indexed at run time goes to local memory.)
+var<private> g_rlo_rho: vec3<f32> = vec3<f32>(0.0);
+var<private> g_rlo_p: vec3<f32> = vec3<f32>(0.0);
+var<private> g_rhi_rho: vec3<f32> = vec3<f32>(0.0);
+var<private> g_rhi_p: vec3<f32> = vec3<f32>(0.0);
 
 // The half-step state `pr` of cell q moved toward first order by weight w: at w = 1 the cell as
 // it is with no slopes, as the positivity check below makes it.
@@ -57,6 +64,10 @@ fn predictor(q: Q, xm0: Q, xp0: Q, ym0: Q, yp0: Q, zm0: Q, zp0: Q, g: vec3<f32>,
       // (The potential is mirrored with it: no difference across the wall.)
       if (q_solid(m[a])) { m[a] = q_mirror(q, a); dl[a] = 0.0; }
       if (q_solid(p[a])) { p[a] = q_mirror(q, a); dr[a] = 0.0; }
+    }
+    if (REF_DEV) {
+      g_ql = vec2<f32>(g_rlo_rho[a], g_rlo_p[a]);
+      g_qr = vec2<f32>(g_rhi_rho[a], g_rhi_p[a]);
     }
     let u = edge_up(m[a], q, p[a], dl[a], dr[a], hi.face[a]);
     var sa = u;

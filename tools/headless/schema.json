@@ -383,6 +383,11 @@
    "about": "Reference state: off, uniform, column"
   },
   {
+   "key": "isen",
+   "group": "settings",
+   "about": "Density along the adiabat (0 or 1)"
+  },
+  {
    "key": "cut",
    "group": "settings",
    "about": "Partly filled cells (0 or 1)"

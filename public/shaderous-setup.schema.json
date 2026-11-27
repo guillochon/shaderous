@@ -752,6 +752,11 @@
      "title": "Reference state",
      "description": "Store the gas as its difference from a state at rest in hydrostatic balance, built from the initial state. Single precision then holds small differences to their own size: the pressure differences of slow flow under a large background pressure (below about Mach 0.003 the plain state rounds them away), and a steep atmosphere at rest over many decades of density. Uniform: the initial mean, for a run without gravity. Column: the initial mean in each layer across a uniform field. For the ideal gas with explicit pressure, on the uniform grid"
     },
+    "isentropicRecon": {
+     "type": "boolean",
+     "title": "Density along the adiabat",
+     "description": "With gravity, reconstruct the density from each neighbor brought to the cell’s pressure along the adiabat, as the balanced reconstruction does the pressure along hydrostatic balance, where the pressure is smooth. Then a layer at the adiabat keeps its entropy at the faces of its cells: with the density reconstructed as it is, a layer stable by a part in 100,000 of the adiabatic gradient convected at Mach 0.008 on 128 cells. For the ideal gas"
+    },
     "cutCells": {
      "type": "boolean",
      "title": "Partly filled cells",
@@ -3411,7 +3416,7 @@
        "name"
       ],
       "additionalProperties": false,
-      "description": "A layer of ideal gas in a unit box, stratified as a polytrope steeper than the adiabat, in balance with the uniform downward acceleration of the setup (Gravity: Uniform acceleration), between walls at the bottom and top: it overturns in convection cells. Seeded with cells at a given Mach number. Up is y in 2D and z in 3D. Below an excess of about 1e-3 on 128 cells the scheme’s own error in the layer’s buoyancy drives the flow, not the excess"
+      "description": "A layer of ideal gas in a unit box, stratified as a polytrope steeper than the adiabat, in balance with the uniform downward acceleration of the setup (Gravity: Uniform acceleration), between walls at the bottom and top: it overturns in convection cells. Seeded with cells at a given Mach number. Up is y in 2D and z in 3D. Below an excess of about 1e-4 on 128 cells the scheme’s own error in the layer’s buoyancy drives the flow, not the excess"
      },
      {
       "type": "object",

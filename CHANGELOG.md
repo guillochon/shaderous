@@ -25,9 +25,20 @@ What changed in each release of Shaderous. A release's section here is the body 
 - **A convection preset** (*Convection*, under Instabilities): a layer steeper than the adiabat,
   built in the grid's own hydrostatic balance and stored against its reference column, whose
   seeded cells grow into convection at about Mach 0.1 (Mach 0.3 at a superadiabatic excess of
-  0.1; the speed goes as the excess's square root, the same within 50% on 256 cells). Below an
-  excess of about 10⁻³ on 128 cells the scheme's own error in the buoyancy drives the flow
-  instead (docs/numerics.md section 7): deep stellar convection is not within reach yet.
+  0.1, 0.0075 at 10⁻⁴; the speed goes as the excess's square root). Below an excess of about
+  10⁻⁴ on 128 cells the scheme's own error in the buoyancy drives the flow instead
+  (docs/numerics.md section 7): deep stellar convection is not within reach yet.
+- **Density along the adiabat** (Solver: Density along the adiabat; `physics.isentropicRecon`,
+  link key `isen`; on by default): for the ideal gas with gravity, the density is reconstructed
+  from each neighbor brought to the cell's pressure along the adiabat, as the balanced
+  reconstruction does the pressure along hydrostatic balance, where the pressure changes by
+  less than 20% from cell to cell (docs/numerics.md section 8). The density reconstructed as it
+  was put the faces of a stratified layer off its adiabat by about (dx / H)², and a layer stable
+  by 10⁻⁵ of the adiabatic gradient convected at Mach 0.008 on 128 cells, gaining 20 times its
+  kinetic energy; now it keeps it, and a layer at the adiabat gains 1.4 times instead of 17. The
+  floor below which a convecting layer's speed is the grid's and not its stratification's falls
+  from between 10⁻³ and 10⁻² of the adiabatic gradient to about 10⁻⁴ on 128 cells. Results of
+  ideal-gas runs with gravity change where the pressure is smooth.
 
 - **Several profiles at once.** Each line the Profile tool places is added to those on show, up
   to six, each in a colour of its own and numbered; their plots are overlaid in one panel, one

@@ -218,6 +218,14 @@ export interface SimConfig {
    */
   reference: RefKind;
   /**
+   * The density reconstructed along the adiabat (hydro/q.wgsl isen_on, P.flags bit 7): what is
+   * limited is each neighbor's density brought to the cell's pressure adiabatically, so that a
+   * stratified layer's face states keep its entropy (docs/numerics.md section 8). For the ideal
+   * gas with the balanced reconstruction (a potential), where the pressure is smooth; on by
+   * default.
+   */
+  isentropicRecon: boolean;
+  /**
    * Partly filled cells (plans/wind-tunnel.md 8.1; hydro/cut.ts): obstacles cut cells where their
    * surfaces lie, each cell holding gas in a share of its volume and each face open in a share of
    * its area, in place of cells wholly gas or wholly solid. The liquid with implicit pressure, on
@@ -672,6 +680,7 @@ export function configFor(problem: Problem, n: number, over: Partial<SimConfig> 
     wellBalanced: true,
     pressure: 'explicit',
     reference: 'off',
+    isentropicRecon: true,
     cutCells: false,
     pressureCycles: 3,
     pressureTol: 1e-4,
@@ -1664,7 +1673,7 @@ export function packParams(
   // placed during a run turn it on with the next write of this block.
   const potential = c.gravity !== 'off' || x.masses > 0 || rotationOf(c)[3] !== 0 || !!c.problem.shear || uniformField(c).some((g) => g !== 0);
   const wb = c.wellBalanced && eosHasEnergy(c.eos) && !cosmologyOf(c) && potential;
-  u.set([c.n, x.selfGravity || x.masses > 0 ? 1 : 0, c.gravity === 'isolated' || !x.selfGravity || spherical(c) ? 1 : 0, (c.gravEnergyFlux && !cosmologyOf(c) ? 1 : 0) | (x.solids ? 2 : 0) | (x.sources ? 4 : 0) | (wb ? 8 : 0) | (c.problem.refineMasses && c.amrLevels > 0 ? 16 : 0) | (c.problem.mhd ? 32 : 0) | (x.gravCorrection ? 64 : 0)], 36);
+  u.set([c.n, x.selfGravity || x.masses > 0 ? 1 : 0, c.gravity === 'isolated' || !x.selfGravity || spherical(c) ? 1 : 0, (c.gravEnergyFlux && !cosmologyOf(c) ? 1 : 0) | (x.solids ? 2 : 0) | (x.sources ? 4 : 0) | (wb ? 8 : 0) | (c.problem.refineMasses && c.amrLevels > 0 ? 16 : 0) | (c.problem.mhd ? 32 : 0) | (x.gravCorrection ? 64 : 0) | (c.isentropicRecon && c.eos === 'ideal' ? 128 : 0)], 36);
   f.set(
     [
       x.dx,

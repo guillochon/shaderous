@@ -389,22 +389,24 @@ reach either way: the reference itself cannot hold it. The presets *Deep atmosph
 heights: Mach $`3\times10^{-10}`$ after a sound crossing with the reference, 1.4 without) and
 *Gresho vortex, gas at Mach 0.001* show it, with the reference among their featured settings.
 
-Slow convection is not yet within reach, and not for want of precision. A polytropic layer in
-discrete balance whose temperature gradient is $`\delta`$ off the adiabat, seeded with
+Slow convection is limited by the scheme's buoyancy as well as by precision. A polytropic
+layer in discrete balance whose temperature gradient is $`\delta`$ off the adiabat, seeded with
 convection cells at Mach $`10^{-3}`$ (2D, $`\gamma = 5/3`$, its temperature halving over a
-box of 128 cells, about 100 cells per pressure scale height at the bottom): at
-$`\delta = -10^{-3}`$, stable, the kinetic energy fell to 0.11 of its start by $`t = 1000`$; at
-$`\delta = -10^{-5}`$, still stable, it grew 20 times, to Mach 0.008, as it did at
-$`\delta = 0`$ and at every $`\delta`$ from $`10^{-10}`$ to $`10^{-5}`$, with the reference or
-without. On 256 cells the neutral layer's grew 1.9 times. The scheme's own error in the
-layer's buoyancy is between $`10^{-5}`$ and $`10^{-3}`$ of the adiabatic gradient on 128
-cells and falls fast with the grid; below it a layer convects at a speed set by the grid, not
-by its stratification. Plain HLL is far worse (a stable layer's kinetic energy grew 85 times
-by $`t = 300`$), the minmod limiter better (it fell to 0.01). The *Convection* preset is this
-layer at $`\delta = 0.01`$, well above that floor: its cells settle at Mach 0.07 to 0.1 with a
-kinetic energy of $`4.5\times10^{-4}`$ on 128 cells and $`6.8\times10^{-4}`$ on 256, and
-$`\delta = 0.1`$ gives Mach 0.27, the speed going as $`\sqrt{\delta}`$. At $`\delta = 10^{-3}`$
-the cells peak at Mach 0.045 and then sink to the floor's level.
+box of 128 cells, about 100 cells per pressure scale height at the bottom). With the density
+reconstructed as it is, a layer stable by $`\delta = -10^{-5}`$ gained 20 times its kinetic
+energy by $`t = 1000`$, to Mach 0.008, as did every layer from $`\delta = 0`$ to $`10^{-5}`$,
+with the reference or without (on 256 cells the neutral layer's grew 1.9 times); one stable by
+$`10^{-3}`$ lost 89% of it. The faces' entropy was off by about $`(\Delta x/H)^2`$; with the
+density reconstructed along the adiabat ([§8](#8-well-balanced-reconstruction)), the default
+with gravity, the layer stable by $`10^{-5}`$ keeps its kinetic energy and the neutral one gains
+1.4 times. The *Convection* preset is this layer at $`\delta = 0.01`$: its cells settle at Mach
+0.07 to 0.1 with a kinetic energy of $`4.8\times10^{-4}`$ on 128 cells ($`6.8\times10^{-4}`$
+on 256 with the plain density), and the speed goes as $`\sqrt{\delta}`$: Mach 0.27 at
+$`\delta = 0.1`$, 0.02 to 0.03 at $`10^{-3}`$ (kinetic energy $`3\times10^{-5}`$), 0.0075 at
+$`10^{-4}`$ ($`1.8\times10^{-6}`$, a few times what the neutral layer gains). Below about
+$`10^{-4}`$ on 128 cells the grid's error still sets the flow; with the plain density that
+floor lay between $`10^{-3}`$ and $`10^{-2}`$, the cells at $`10^{-3}`$ peaking at Mach 0.045 and
+sinking to it.
 
 The columns also needed HLLC to be exact at rest ([§6](#hllc-default)): it forms its star
 state's density as $`\rho(S - u)/(S - S^*)`$ and the flux from that less $`\rho`$, which at a
@@ -459,6 +461,29 @@ against 0.35 without the balanced reconstruction. The background of the Rayleigh
 problem is 240 times quieter, and the error in the Jeans growth rate 12 times smaller. It is
 on by default for every equation of state with an energy; `wb=0` in a link turns it off for
 comparison.
+
+**Density along the adiabat.** The balanced reconstruction makes the pressure smooth in a
+stratified layer, but the density was reconstructed as it is, and in a layer about a hundred
+cells per scale height deep it changes by a part in a hundred per cell, where the limiter's
+switch to limiting lies ([§5](#5-reconstruction-and-limiters)). The faces then carried a
+density and a pressure off the cell's adiabat by about $`(\Delta x/H)^2`$, and gas carried up
+or down arrived with the wrong entropy: a spurious buoyancy. A layer at the adiabat, seeded
+with convection cells at Mach $`10^{-3}`$ on 128 cells, gained 17 times its kinetic energy by
+$`t = 1000`$, and so did one stable by $`10^{-5}`$ of the adiabatic gradient
+([§7](#deviations-from-a-reference)); the more compressive the limiter, the more (at
+$`t = 300`$: Koren 2.9 times, MC 1.4, van Leer 1.1; minmod damped it to 0.24).
+
+So for the ideal gas, where there is a potential, the density is reconstructed the way the
+pressure is: what is limited is each neighbor's density brought to the cell's pressure along
+the adiabat, $`\rho_n (p_c/p_n)^{1/\gamma}`$, flat in a layer at the adiabat, and the face
+density is that reconstruction carried to the face's pressure along the adiabat
+(`hydro/q.wgsl` `isen_inc`, on whole densities and pressures with a reference state too). It
+applies only where the pressure changes by less than 20% from cell to cell: across a shock the
+gas is not on one adiabat, and there it drifted the Evrard collapse's energy by 4.8% (0.23%
+without), and without a potential it only made a Sedov blast less round. With it the layer
+stable by $`10^{-5}`$ keeps its kinetic energy (1.0 times by $`t = 1000`$ with a reference
+state, 1.4 without), the layer at the adiabat gains 1.4 times (1.6 without a reference), and
+resolved convection is unchanged. `physics.isentropicRecon` (link key `isen`) turns it off.
 
 ## 9. Equations of state
 

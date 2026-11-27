@@ -220,15 +220,29 @@ fn axis_fluxes(c: vec3<i32>, e: vec3<i32>, axis: i32, w0: Q, p0: Q) -> Faces {
     r2 = ref_at(c);
     r3 = ref_at(c + e);
     r4 = ref_at(c + 2 * e);
+    g_ql = r0.xy;
     g_qs = r1.xy;
+    g_qr = r2.xy;
   }
   let sm = edge_up(wm2, wm1, w0, d.x, d.y, fm);
-  if (REF_DEV) { g_qs = r2.xy; }
+  if (REF_DEV) {
+    g_ql = r1.xy;
+    g_qs = r2.xy;
+    g_qr = r3.xy;
+  }
   let lo = edge_dn(wm1, w0, wp1, d.y, d.z, t.x);
   let hi = edge_up(wm1, w0, wp1, d.y, d.z, t.y);
-  if (REF_DEV) { g_qs = r3.xy; }
+  if (REF_DEV) {
+    g_ql = r2.xy;
+    g_qs = r3.xy;
+    g_qr = r4.xy;
+  }
   let sp = edge_dn(w0, wp1, wp2, d.z, d.w, fp);
-  if (REF_DEV) { g_qs = vec2<f32>(0.0); }
+  if (REF_DEV) {
+    g_ql = vec2<f32>(0.0);
+    g_qs = vec2<f32>(0.0);
+    g_qr = vec2<f32>(0.0);
+  }
   return Faces(
     add_diffusion(wall_face(face_flux(pm1, sm, p0, lo, axis, km1, k0, fm, t.x, ref_face(r0, r1, r2, 1.0, fm), ref_face(r1, r2, r3, -1.0, t.x)), below, axis, nm1.a[axis + 1]), c - e, e, axis, nm1, w0),
     add_diffusion(wall_face(face_flux(p0, hi, pp1, sp, axis, k0, kp1, t.y, fp, ref_face(r1, r2, r3, 1.0, t.y), ref_face(r2, r3, r4, -1.0, fp)), above, axis, np1.a[axis + 1]), c, e, axis, w0, np1),
@@ -313,12 +327,22 @@ fn flux_between(a: vec3<i32>, e: vec3<i32>, axis: i32) -> Flux {
     r1 = ref_at(a);
     r2 = ref_at(a + e);
     r3 = ref_at(a + 2 * e);
+    g_ql = r0.xy;
     g_qs = r1.xy;
+    g_qr = r2.xy;
   }
   let sl = edge_up(wll, wl, wr, d.x, d.y, fl);
-  if (REF_DEV) { g_qs = r2.xy; }
+  if (REF_DEV) {
+    g_ql = r1.xy;
+    g_qs = r2.xy;
+    g_qr = r3.xy;
+  }
   let sr = edge_dn(wl, wr, wrr, d.y, d.z, fr);
-  if (REF_DEV) { g_qs = vec2<f32>(0.0); }
+  if (REF_DEV) {
+    g_ql = vec2<f32>(0.0);
+    g_qs = vec2<f32>(0.0);
+    g_qr = vec2<f32>(0.0);
+  }
   return add_diffusion(wall_face(face_flux(pl, sl, pr, sr, axis, kl, kr, fl, fr, ref_face(r0, r1, r2, 1.0, fl), ref_face(r1, r2, r3, -1.0, fr)), wall, axis, vw), a, e, axis, nl, nr);
 }
 

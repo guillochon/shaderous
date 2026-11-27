@@ -6,18 +6,18 @@
 // - delta), so that on the grid it is delta off the adiabat to rounding. (Sampled from the smooth
 // polytrope instead, the grid's layer differs from it by (dx / H)^2, 1e-4 on 128 cells, which
 // would set how unstable it is in place of delta.) The scheme's own error in a layer's buoyancy
-// is a floor all the same: on 128 cells a layer stable by 1e-5 convects as a neutral one does,
-// and one stable by 1e-3 does not (docs/numerics.md section 7). Below the floor the flow is the
-// grid's, not the layer's.
+// is a floor all the same: about 1e-4 on 128 cells with the density reconstructed along the
+// adiabat, between 1e-3 and 1e-2 without (docs/numerics.md section 7). Below the floor the flow is the grid's,
+// not the layer's.
 import type { FlowDef } from '../flow';
 
 const convection: FlowDef<{ delta: number; beta: number; seed: number; cells: number }> = {
   name: 'convection',
   label: 'Convecting layer',
-  tip: 'A layer of ideal gas in a unit box, stratified as a polytrope steeper than the adiabat, in balance with the uniform downward acceleration of the setup (Gravity: Uniform acceleration), between walls at the bottom and top: it overturns in convection cells. Seeded with cells at a given Mach number. Up is y in 2D and z in 3D. Below an excess of about 1e-3 on 128 cells the scheme’s own error in the layer’s buoyancy drives the flow, not the excess',
+  tip: 'A layer of ideal gas in a unit box, stratified as a polytrope steeper than the adiabat, in balance with the uniform downward acceleration of the setup (Gravity: Uniform acceleration), between walls at the bottom and top: it overturns in convection cells. Seeded with cells at a given Mach number. Up is y in 2D and z in 3D. Below an excess of about 1e-4 on 128 cells the scheme’s own error in the layer’s buoyancy drives the flow, not the excess',
   wholeBox: true,
   fields: {
-    delta: { label: 'Superadiabatic excess', default: 0.01, min: 1e-6, max: 0.2, factor: 2, tip: 'How much steeper the layer is than the adiabat: dln T / dln p less its adiabatic value (gamma - 1) / gamma. The more, the faster it overturns. Below about 1e-3 on 128 cells (less on finer grids) the scheme’s own error in the buoyancy is larger than the excess, and the flow is the grid’s' },
+    delta: { label: 'Superadiabatic excess', default: 0.01, min: 1e-6, max: 0.2, factor: 2, tip: 'How much steeper the layer is than the adiabat: dln T / dln p less its adiabatic value (gamma - 1) / gamma. The more, the faster it overturns. Below about 1e-4 on 128 cells (less on finer grids) the scheme’s own error in the buoyancy is larger than the excess, and the flow is the grid’s' },
     beta: { label: 'Temperature drop', default: 0.5, min: 0.01, max: 0.95, step: 0.01, tip: 'The fraction by which the temperature falls from the bottom to the top. The density falls by about its power 1.5, the pressure by its power 2.5' },
     seed: { label: 'Seed Mach number', default: 1e-3, min: 0, max: 0.5, factor: 2, tip: 'The peak speed of the seeded convection cells over the sound speed at the bottom' },
     cells: { label: 'Cells across', default: 2, min: 1, max: 16, step: 1, tip: 'Pairs of seeded convection cells across the box (along x, and y in 3D)' },

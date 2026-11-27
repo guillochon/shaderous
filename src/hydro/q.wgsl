@@ -2,6 +2,7 @@
 // limiter.
 //   a = (rho, vx, vy, vz)    b = (p, scalar, c_s, 1 if the cell is solid)
 struct Q { a: vec4<f32>, b: vec4<f32> }
+#include <refdev>
 
 fn q_solid(q: Q) -> bool {
   return q.b.w > 0.5;
@@ -69,10 +70,62 @@ fn wb_above(c: Q, r: Q, dr: f32) -> vec4<f32> {
   d.x += 0.5 * (c.a.x + r.a.x) * dr;
   return d;
 }
+// Density reconstructed along the adiabat (P.flags bit 7, SimConfig.isentropicRecon; the ideal
+// gas): what is limited is each neighbor's density brought to the cell's pressure adiabatically,
+// rho_n (p_c / p_n)^(1/gamma), the analog for the entropy of what the balanced reconstruction
+// does for the pressure, and the face density is that reconstruction carried to the face's
+// pressure along the adiabat. In a layer at the adiabat the limited quantity is flat, and the
+// face states keep the cell's entropy. Limited as it is, the density changes by about a part in a
+// hundred per cell in a layer a hundred cells per scale height deep, where the limiter's switch
+// lies, and the faces of a layer at the adiabat came out off it by (dx / H)^2: a layer 1e-5 of
+// the adiabatic gradient on the stable side convected at Mach 0.008 (docs/numerics.md section 7).
+// It works on the whole densities and pressures. For a gas stored as its deviation from a
+// reference, the references of the increment's middle cell (g_qs) and of its lower and upper
+// neighbors (g_ql, g_qr), which the callers set, make them; zero otherwise.
+const ISEN_SMOOTH: f32 = 0.2;
+var<private> g_ql: vec2<f32> = vec2<f32>(0.0);
+var<private> g_qr: vec2<f32> = vec2<f32>(0.0);
+// Only with the balanced reconstruction (a potential to balance against): it is stratification
+// that it is for, and without one it only changed blasts (a Sedov blast 1.7 cells out of round
+// against 1.5 with the plain density).
+fn isen_on() -> bool { return (P.flags & 128u) != 0u && well_balanced() && EOS_HAS_ENERGY && !p_signed(); }
+// Twice the increment of the cell's stored density toward a face (sgn 1, its upper face) or from
+// one (sgn -1, its lower face), given the pressure increment bx the cell returns there and the
+// potential step df it was given; -1e30 where a density or pressure is not positive.
+fn isen_inc(l: Q, c: Q, r: Q, bx: f32, df: f32, sgn: f32) -> f32 {
+  let gi = 1.0 / P.eos.x;
+  let wl = vec2<f32>(l.a.x, l.b.x) + g_ql;
+  let wc = vec2<f32>(c.a.x, c.b.x) + g_qs;
+  let wr = vec2<f32>(r.a.x, r.b.x) + g_qr;
+  if (!(all(wl > vec2<f32>(0.0)) && all(wc > vec2<f32>(0.0)) && all(wr > vec2<f32>(0.0)))) { return -1e30; }
+  // Only where the pressure is smooth (within 20% from cell to cell; a layer 50 cells per scale
+  // height changes by 2%): across a shock the gas is not on one adiabat, and there it drifted
+  // the Evrard collapse's energy by 4.8% (0.23% with the plain density).
+  if (abs(wl.y - wc.y) > ISEN_SMOOTH * wc.y || abs(wr.y - wc.y) > ISEN_SMOOTH * wc.y) { return -1e30; }
+  // The neighbors' densities at the cell's pressure, less the cell's.
+  let tl = wl.x * pow(wc.y / wl.y, gi) - wc.x;
+  let tr = wr.x * pow(wc.y / wr.y, gi) - wc.x;
+  let far = select(tr, -tl, sgn > 0.0);
+  let near = select(-tl, tr, sgn > 0.0);
+  let d = edge4(vec4<f32>(far, 0.0, 0.0, 0.0), vec4<f32>(near, 0.0, 0.0, 0.0), vec4<f32>(wc.x, 1.0, 1.0, 1.0)).x;
+  // The whole pressure at the face: the deviation's increment and the reference's along its balance.
+  let pf = wc.y + 0.5 * sgn * (bx - g_qs.x * df);
+  let rf = (wc.x + 0.5 * sgn * d) * pow(max(pf, 1e-30) / wc.y, gi);
+  // Less the reference's own increment, which the face adds (hydro/ref_on.wgsl ref_face).
+  let a = g_qr.x - g_qs.x;
+  let b = g_qs.x - g_ql.x;
+  let rs = select(0.0, select(b, a, abs(a) < abs(b)), a * b > 0.0);
+  return 2.0 * sgn * (rf - wc.x) - rs;
+}
 fn edge_up(l: Q, c: Q, r: Q, dl: f32, dr: f32, df: f32) -> Q {
   var b = edge4(wb_below(l, c, dl), wb_above(c, r, dr), vec4<f32>(p_scale(c), 0.0, c.b.z, 0.0));
   b.x -= c.a.x * df;
-  return Q(edge4(c.a - l.a, r.a - c.a, vec4<f32>(c.a.x + g_qs.x, c.b.zzz)), b);
+  var a = edge4(c.a - l.a, r.a - c.a, vec4<f32>(c.a.x + g_qs.x, c.b.zzz));
+  if (isen_on()) {
+    let i = isen_inc(l, c, r, b.x, df, 1.0);
+    if (i > -1e29) { a.x = i; }
+  }
+  return Q(a, b);
 }
 fn edge_dn(l: Q, c: Q, r: Q, dl: f32, dr: f32, df: f32) -> Q {
   var b: vec4<f32>;
@@ -83,5 +136,10 @@ fn edge_dn(l: Q, c: Q, r: Q, dl: f32, dr: f32, df: f32) -> Q {
   }
   b.x -= c.a.x * df;
   if (LIMITER_SYMMETRIC) { return Q(edge4(c.a - l.a, r.a - c.a, vec4<f32>(c.a.x + g_qs.x, c.b.zzz)), b); }
-  return Q(edge4(r.a - c.a, c.a - l.a, vec4<f32>(c.a.x + g_qs.x, c.b.zzz)), b);
+  var a = edge4(r.a - c.a, c.a - l.a, vec4<f32>(c.a.x + g_qs.x, c.b.zzz));
+  if (isen_on()) {
+    let i = isen_inc(l, c, r, b.x, df, -1.0);
+    if (i > -1e29) { a.x = i; }
+  }
+  return Q(a, b);
 }

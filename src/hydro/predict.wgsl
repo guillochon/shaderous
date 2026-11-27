@@ -88,7 +88,13 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     for (var a = 0; a < 3; a++) {
       var e = vec3<i32>(0);
       e[a] = 1;
-      g_rds[a] = ref_slope(ref_at(c - e), r, ref_at(c + e));
+      let rm = ref_at(c - e);
+      let rp = ref_at(c + e);
+      g_rds[a] = ref_slope(rm, r, rp);
+      g_rlo_rho[a] = rm.x;
+      g_rlo_p[a] = rm.y;
+      g_rhi_rho[a] = rp.x;
+      g_rhi_p[a] = rp.y;
     }
   }
   var pr = predictor(
