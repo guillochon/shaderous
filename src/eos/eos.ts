@@ -316,7 +316,68 @@ export function mixtureParams(kind: EosKind, params: EosParams, k: readonly numb
  * mixture whose composition varies (`zh1` as for mixtureParams); without, the uniform one of
  * `params`.
  */
+/**
+ * The kinds whose eintFromP solves for it (a temperature by Newton's method on tables): the
+ * initial conditions and the settling ask it once a cell, and most cells of a box with a star in
+ * it are the same ambient gas.
+ */
+const SOLVED_EINT: ReadonlySet<EosKind> = new Set(['gas_radiation', 'ionizing', 'helmholtz', 'hhe', 'aneos']);
+
+/**
+ * eintFromP remembering its last two answers. It is a function of (rho, p) alone, so an answer
+ * for the same two numbers is the answer: nothing is approximated. A row of ambient cells, or the
+ * ambient gas between a star's cells, asks the same thing over and over (a 0.6 M_sun dwarf at
+ * 128^3: 91% of the cells, and 20 s of a 28 s load).
+ */
+function rememberEint(eos: Eos): Eos {
+  const f = eos.eintFromP;
+  let r0 = NaN;
+  let p0 = NaN;
+  let e0 = 0;
+  let r1 = NaN;
+  let p1 = NaN;
+  let e1 = 0;
+  return {
+    ...eos,
+    eintFromP: (rho, p) => {
+      if (rho === r0 && p === p0) return e0;
+      if (rho === r1 && p === p1) {
+        [r0, p0, e0, r1, p1, e1] = [r1, p1, e1, r0, p0, e0];
+        return e0;
+      }
+      const e = f(rho, p);
+      [r1, p1, e1] = [r0, p0, e0];
+      [r0, p0, e0] = [rho, p, e];
+      return e;
+    },
+  };
+}
+
+/**
+ * makeEos for cell after cell of one run, the same equation of state for the same composition
+ * moments: most cells share theirs (the ambient gas, a star's own), and an Eos of its own for each
+ * left eintFromP nothing to remember (rememberEint). Exact: the moments are the key.
+ */
+export function eosForMoments(kind: EosKind, params: EosParams, zh1 = 2): (k: readonly number[]) => Eos {
+  const seen = new Map<string, Eos>();
+  return (k) => {
+    const key = `${k[0]},${k[1]},${k[2]},${k[3]}`;
+    let e = seen.get(key);
+    if (!e) {
+      if (seen.size >= 256) seen.clear();
+      e = makeEos(kind, params, k, zh1);
+      seen.set(key, e);
+    }
+    return e;
+  };
+}
+
 export function makeEos(kind: EosKind, params: EosParams, k?: readonly number[], zh1 = 2): Eos {
+  const eos = makeEosOf(kind, params, k, zh1);
+  return SOLVED_EINT.has(kind) ? rememberEint(eos) : eos;
+}
+
+function makeEosOf(kind: EosKind, params: EosParams, k?: readonly number[], zh1 = 2): Eos {
   // Comoving coordinates: densities and pressures in, and energy densities out, are comoving,
   // a^3 times the proper ones the equation of state relates (comovingEosSlot).
   const s = params.comovingA3;

@@ -7,7 +7,7 @@
 import { domainLo } from '../domain';
 import { BS } from './tree';
 import type { Eos } from '../eos/eos';
-import { makeEos } from '../eos/eos';
+import { eosForMoments, makeEos } from '../eos/eos';
 import { burnIndicator, burnIndices, isNetworkBurn } from '../burn/burn';
 import { cellMark, type Prim } from '../problems/types';
 import { burnSpec, implicitPressure, type SimConfig } from '../sim';
@@ -223,6 +223,9 @@ export interface FillContext {
 }
 
 /** A leaf's conserved state (and magnetic faces) from the setup, at its cell centers. */
+/** The equations of state of a fill's compositions, kept from block to block (eosForMoments). */
+const eosCache = new WeakMap<FillContext, (k: readonly number[]) => Eos>();
+
 export function leafState(x: FillContext, b: BlockAt): LeafState {
   const { cfg: c, fn, eos, kc, groups: G } = x;
   const three = c.ndim === 3;
@@ -260,7 +263,9 @@ export function leafState(x: FillContext, b: BlockAt): LeafState {
         if (km) {
           const mo = mixMoments(kc!, w.X);
           km.set(mo, o);
-          ce = makeEos(c.eos, c.eosParams, mo, hydrogenParticles(c.problem.composition));
+          let eosOf = eosCache.get(x);
+          if (!eosOf) eosCache.set(x, (eosOf = eosForMoments(c.eos, c.eosParams, hydrogenParticles(c.problem.composition))));
+          ce = eosOf(mo);
         }
         let eint = ce.eintFromP(w.rho, p);
         if (rad) {

@@ -16,7 +16,7 @@ import { Multigrid } from './gravity/multigrid';
 import { LumpReader, lumpGrid } from './gravity/lumps';
 import { MassSums } from './gravity/mass_sums';
 import type { Lump } from './gravity/preview';
-import { comovingEosSlot, defaultEosParams, eosHasEnergy, hheUnsupported, EOS_MODULES, eosConstants1, eosConstants2, makeEos, physicalEosParams, type Eos, type EosKind, type EosParams } from './eos/eos';
+import { comovingEosSlot, defaultEosParams, eosForMoments, eosHasEnergy, hheUnsupported, EOS_MODULES, eosConstants1, eosConstants2, makeEos, physicalEosParams, type Eos, type EosKind, type EosParams } from './eos/eos';
 import { PF_CLOSED, PF_OPEN, PF_PERIODIC, PressureSolver } from './pressure/multigrid';
 import { cellMark, isSelfGravity, problemUnits, sizedProblem, type Bc3, type ForceRef, type GravityMode, type PointMass, type Problem } from './problems/types';
 import { createBurnPass, type AnyBurnSpec, type Burner } from './burn/burn';
@@ -2654,6 +2654,8 @@ export class Sim implements Simulation {
     // and taken from before anything is rounded to single precision.
     const dev = refOn(c) ? { rho: new Float64Array(cells), eint: new Float64Array(cells), ke: new Float64Array(cells) } : null;
     this.ref = null;
+    // The equations of state of the cells' compositions, one for each (eosForMoments).
+    let eosOf: ((k: readonly number[]) => Eos) | undefined;
     for (let k = 0; k < nz; k++) {
       const z = nz === 1 ? 0 : (k + 0.5) * this.dx + lo[2];
       for (let j = 0; j < ny; j++) {
@@ -2667,7 +2669,7 @@ export class Sim implements Simulation {
           if (km) {
             const m = mixMoments(kc!, w.X);
             km.set(m, o);
-            ce = makeEos(c.eos, c.eosParams, m, hydrogenParticles(c.problem.composition));
+            ce = (eosOf ??= eosForMoments(c.eos, c.eosParams, hydrogenParticles(c.problem.composition)))(m);
           }
           const p = ce.hasEnergy ? w.p : ce.pressure(w.rho, 0);
           let eint = ce.eintFromP(w.rho, p);

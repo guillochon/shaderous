@@ -77,6 +77,13 @@ What changed in each release of Shaderous. A release's section here is the body 
 
 ### Fixed
 
+- **Stars load in seconds.** A white dwarf's initial conditions asked the tabulated equation of
+  state for the same ambient gas's energy in every cell (91% of a 0.6 M☉ dwarf's box at 128³):
+  it now remembers its last answers, exactly, and a run with species keeps one equation of state
+  a composition instead of one a cell. A giant's cored envelope is solved by regula falsi
+  instead of nested bisection, to the same digits. The white dwarf preset loads in 9 s instead
+  of 28-36, the white dwarf collision in 3 s instead of 21, the common envelope in 10 s instead
+  of 22-28; what is left is mostly compiling shaders.
 - **White dwarfs are built at their true radius.** The cold white dwarf a setup starts from was
   integrated with a sound speed missing a factor of the equation of state's density scale
   (0.98 in white dwarf units), so every one was built too soft: 3% too small at 0.6 M☉ and 5% at

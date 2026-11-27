@@ -55,6 +55,35 @@ function integrate(n: number, A: number, P: number, qc: number, e: number, table
 const cache = new Map<string, CoredPolytrope>();
 
 /**
+ * The root of f between lo and hi (f(lo) > 0 > f(hi) or the reverse) by regula falsi with the
+ * Illinois step: as sure as bisection, but each integration counts, and it reaches the root to
+ * rounding in about ten where bisection took sixty (a giant's envelope, nested two deep, was 2.4 s
+ * of a load; now 0.05).
+ */
+function root(f: (x: number) => number, lo: number, hi: number, fLo = f(lo), fHi = f(hi)): number {
+  let side = 0;
+  for (let i = 0; i < 200; i++) {
+    const x = fHi !== fLo ? (lo * fHi - hi * fLo) / (fHi - fLo) : 0.5 * (lo + hi);
+    const at = x > Math.min(lo, hi) && x < Math.max(lo, hi) ? x : 0.5 * (lo + hi);
+    const fx = f(at);
+    if (fx === 0 || Math.abs(hi - lo) <= 1e-15 * Math.max(Math.abs(lo), Math.abs(hi))) return at;
+    if (fx * fHi > 0) {
+      hi = at;
+      fHi = fx;
+      if (side === 1) fLo /= 2;
+      side = 1;
+    } else {
+      lo = at;
+      fLo = fx;
+      if (side === -1) fHi /= 2;
+      side = -1;
+    }
+    if (Math.abs(hi - lo) <= 1e-14 * Math.max(Math.abs(lo), Math.abs(hi))) return 0.5 * (lo + hi);
+  }
+  return 0.5 * (lo + hi);
+}
+
+/**
  * The envelope of mass `Menv` and radius `R` of index `n` around a core of mass `Mc` softened
  * by `soft`. Throws if there is none (a core so heavy and compact that its pull alone ends the
  * gas inside R needs a larger softening or a lighter core).
@@ -74,25 +103,12 @@ export function coredPolytrope(n: number, Menv: number, R: number, Mc: number, s
       hi *= 2;
       if (hi > 1e12) throw new Error('a star with a core: no envelope of that mass and radius');
     }
-    for (let i = 0; i < 60; i++) {
-      const mid = 0.5 * (lo + hi);
-      if (integrate(n, A, mid, qc, e).end > 0) lo = mid;
-      else hi = mid;
-    }
-    return 0.5 * (lo + hi);
+    return root((P) => integrate(n, A, P, qc, e).end, lo, hi);
   };
   // The most A the core allows: theta(1) = 0 with no gas at all.
   const aMax = 1 / (qc * (1 / e - 1 / Math.sqrt(1 + e * e)));
-  let lo = 1e-9 * aMax;
-  let hi = aMax * (1 - 1e-9);
-  let A = hi;
-  let P = 0;
-  for (let i = 0; i < 60; i++) {
-    A = 0.5 * (lo + hi);
-    P = solveP(A);
-    if (integrate(n, A, P, qc, e).nu > A) lo = A;
-    else hi = A;
-  }
+  const A = root((a) => integrate(n, a, solveP(a), qc, e).nu - a, 1e-9 * aMax, aMax * (1 - 1e-9));
+  const P = solveP(A);
   const table = new Float64Array(STEPS + 1);
   integrate(n, A, P, qc, e, table);
   table[STEPS] = 0;
