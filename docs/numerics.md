@@ -2139,7 +2139,12 @@ $`E`$ includes $`B^2/2`$.
   modes of A between $`2\pi/R`$ and 8 times that with $`|A_k| \propto k^{-17/6}`$ (a Kolmogorov
   $`E_B(k) \propto k^{-5/3}`$), tapered the same way and scaled so that the mean $`B^2`$ within
   $`R/5`$ of the center gives the beta. The taper takes the preset's own pressure profile, not
-  the settled one. The faces are the line integrals of A as for every other field, so coarse and
+  the settled one. With the taper linear in p, B falls about as fast as p toward the surface
+  (in a cold white dwarf a little faster, about $`p^{1.4}`$), so the plasma beta climbs as
+  $`1/p`$ or more: in a 0.6 solar mass white dwarf with beta $`10^5`$ at the center, it is
+  $`10^8`$ by $`6\times10^4`$ g/cm³. The taper `sqrt` (`field.taper`) takes its square root
+  instead, as Guillochon & McCourt's fields do, so B follows $`\sqrt{p}`$ and the beta stays
+  about the central one out to the field's edge. The faces are the line integrals of A as for every other field, so coarse and
   fine agree and $`\nabla\cdot B`$ is at rounding. In `mhd-star-fields` the dipole polytrope
   (beta 1000) keeps its central density to 0.5% (0.1% on blocks) and its magnetic energy to 2%
   for two dynamical times; the random field loses 15% of its energy in one, its small scales

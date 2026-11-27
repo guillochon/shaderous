@@ -1880,6 +1880,14 @@
           "description": "Dipole or random: the field is zero where the pressure is below this fraction of the central pressure; 0 takes it to the surface. Left empty, the star’s own: 1% for a white dwarf or a star from a table, the surface for a polytrope",
           "minimum": 0,
           "maximum": 0.99
+         },
+         "taper": {
+          "enum": [
+           "pressure",
+           "sqrt"
+          ],
+          "title": "Field profile",
+          "description": "Dipole or random: how the field falls off toward the surface. With the pressure, the plasma beta climbs steeply in the outer layers (as 1 / p); with its square root, the beta stays about what it is at the center, out to the field’s edge, as in Guillochon & McCourt’s fields"
          }
         },
         "additionalProperties": false,

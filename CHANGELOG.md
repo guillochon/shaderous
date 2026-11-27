@@ -62,6 +62,12 @@ What changed in each release of Shaderous. A release's section here is the body 
   the budget in force against the automatic one, and a click opens Performance. Auto there now
   also forgets the crash and restores the full automatic budget (before, a lowered budget stayed
   until the user typed a value).
+- **A field profile for the fields inside stars** (`field.taper`, *Field profile* in the star's
+  field): the dipole and the random field can now fall off as the square root of the pressure,
+  as Guillochon & McCourt's do, so the plasma beta stays about the central one out to the
+  field's edge. With the pressure (as before, and still the default), the beta of a white dwarf's
+  outer layers is thousands of times the central one, and gas pulled off the surface carries
+  almost no field.
 
 ### Fixed
 

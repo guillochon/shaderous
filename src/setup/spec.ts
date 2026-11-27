@@ -19,6 +19,8 @@ export const FRAMES = ['inertial', 'gas', 'masses'] as const;
 export const ORBIT_TYPES = ['binary', 'flyby', 'collision'] as const;
 export const STAR_TYPES = ['polytrope', 'white-dwarf', 'planet'] as const;
 export const STAR_FIELD_TYPES = ['dipole', 'random', 'gm17-dipole', 'gm17-random'] as const;
+/** How a dipole or random field falls off toward the surface: as the pressure, or as its square root. */
+export const STAR_FIELD_TAPERS = ['pressure', 'sqrt'] as const;
 export const DISK_PROFILES = ['thin', 'balanced'] as const;
 export const DISK_HEIGHTS = ['H', 'length'] as const;
 export const SHAPE_TYPES = ['sphere', 'box', 'half', 'mesh'] as const;
@@ -342,6 +344,10 @@ export interface StarField {
    * zero where the pressure is below it); the star's own if left out: 1% for a white dwarf or a
    * star from a table, 0 (the surface) for a polytrope */
   cut?: number;
+  /** dipole, random: the taper of the vector potential, (p - p_cut) / (p_c - p_cut) or its square
+   * root ('sqrt': B follows sqrt(p), so the plasma beta stays about the same out to the surface,
+   * as in Guillochon & McCourt's fields); 'pressure' if left out */
+  taper?: (typeof STAR_FIELD_TAPERS)[number];
 }
 
 export interface StarPart {

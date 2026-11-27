@@ -3,8 +3,9 @@
 // block grid's summed over the finest level's segments), so it is divergence-free to rounding
 // and coarse faces are the mean of the fine ones.
 //
-// Both are confined to the star by a taper, (p - p_cut) / (p_c - p_cut) where positive, from the
-// star's own pressure profile (the preset's, not the settled one: any A gives a divergence-free
+// Both are confined to the star by a taper, (p - p_cut) / (p_c - p_cut) where positive, or its
+// square root (the field then follows sqrt(p), and its plasma beta is about the same throughout),
+// from the star's own pressure profile (the preset's, not the settled one: any A gives a divergence-free
 // field, and at the plasma betas these are meant for the field does not change the balance).
 
 /** A star's pressure at radius r from its center (code units), and the cut below which there is no field. */
@@ -20,15 +21,20 @@ export interface StarProfile {
 
 type Potential = (x: number, y: number, z: number) => [number, number, number];
 
+/** The taper at radius r: ((p - p_cut) / (p_c - p_cut))^exponent where positive, else 0. */
+const taperAt = (star: StarProfile, exponent: number, r: number): number => {
+  const f = Math.max(star.pressure(r) - star.pcut, 0) / (star.pc - star.pcut);
+  return exponent === 1 ? f : f ** exponent;
+};
+
 /**
- * A dipole along z: A = A0 max(p - p_cut, 0) (-y, x, 0), A_phi = A0 f(r) varpi, whose curl at
- * the center is B_z = 2 A0 (p_c - p_cut). A0 makes the plasma beta there `beta`.
+ * A dipole along z: A = A0 f (-y, x, 0), A_phi = A0 f(r) varpi, with f the taper (1 at the
+ * center), whose curl at the center is B_z = 2 A0. A0 makes the plasma beta there `beta`.
  */
-export function dipoleField(star: StarProfile, beta: number): Potential {
-  const bc = Math.sqrt((2 * star.pc) / beta);
-  const a0 = bc / (2 * (star.pc - star.pcut));
+export function dipoleField(star: StarProfile, beta: number, exponent = 1): Potential {
+  const a0 = Math.sqrt((2 * star.pc) / beta) / 2;
   return (x, y, z) => {
-    const f = Math.max(star.pressure(Math.hypot(x, y, z)) - star.pcut, 0);
+    const f = taperAt(star, exponent, Math.hypot(x, y, z));
     return [-a0 * f * y, a0 * f * x, 0];
   };
 }
@@ -53,7 +59,7 @@ function generator(seed: number) {
  * E(k) ~ k^(-5/3).) Tapered to the star, then scaled so that the mean B^2 within a fifth of the
  * radius of the center makes the plasma beta there `beta`.
  */
-export function randomField(star: StarProfile, beta: number, seed = 1, modes = 64, kmaxPerR = 8): Potential {
+export function randomField(star: StarProfile, beta: number, seed = 1, exponent = 1, modes = 64, kmaxPerR = 8): Potential {
   const rnd = generator(seed);
   const gauss = () => Math.sqrt(-2 * Math.log(Math.max(rnd(), 1e-12))) * Math.cos(2 * Math.PI * rnd());
   const kmin = (2 * Math.PI) / star.radius;
@@ -73,7 +79,7 @@ export function randomField(star: StarProfile, beta: number, seed = 1, modes = 6
     ms.push({ k: n.map((c) => c * kk), a: u.map((c) => (amp * c) / ul), phase: 2 * Math.PI * rnd() });
   }
   const raw: Potential = (x, y, z) => {
-    const f = Math.max(star.pressure(Math.hypot(x, y, z)) - star.pcut, 0) / (star.pc - star.pcut);
+    const f = taperAt(star, exponent, Math.hypot(x, y, z));
     if (f === 0) return [0, 0, 0];
     let ax = 0;
     let ay = 0;

@@ -203,10 +203,12 @@ export function starPotential(st: BuiltStar): ((x: number, y: number, z: number)
   const own = st.profile();
   // A cut given in the setup replaces the star's own (a fraction of the central pressure).
   const prof = f.cut !== undefined && f.cut >= 0 ? { ...own, pcut: Math.min(f.cut, 0.99) * own.pc } : own;
+  // The taper's exponent: the field follows the pressure (1) or its square root (1/2).
+  const taper = f.taper === 'sqrt' ? 0.5 : 1;
   // Guillochon & McCourt's fields follow the pressure to the surface: no cut.
   const A =
-    f.type === 'dipole' ? dipoleField(prof, beta)
-    : f.type === 'random' ? randomField(prof, beta, seed)
+    f.type === 'dipole' ? dipoleField(prof, beta, taper)
+    : f.type === 'random' ? randomField(prof, beta, seed, taper)
     : f.type === 'gm17-dipole' ? gm17Dipole({ ...prof, pcut: 0 }, beta)
     : gm17Random({ ...prof, pcut: 0 }, beta, seed);
   const [cx, cy, cz] = st.center;

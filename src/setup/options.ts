@@ -20,7 +20,7 @@ import { ANEOS_LABELS, ANEOS_MATERIALS } from '../eos/aneos';
 import { speciesNuclides } from '../species/mixture';
 import { MAX_AMR_LEVELS } from '../amr/tree';
 import { AXES, MESH_ANCHORS, REFINE_MODES, TUNNEL_FLOORS, TUNNEL_SIDES } from './spec';
-import { DISK_HEIGHTS, DISK_PROFILES, FRAMES, getPath, MESH_UPS, ORBIT_TYPES, SHAPE_TYPES, STAR_FIELD_TYPES, STAR_TYPES, type Part, type PartKind, type SetupSpec } from './spec';
+import { DISK_HEIGHTS, DISK_PROFILES, FRAMES, getPath, MESH_UPS, ORBIT_TYPES, SHAPE_TYPES, STAR_FIELD_TAPERS, STAR_FIELD_TYPES, STAR_TYPES, type Part, type PartKind, type SetupSpec } from './spec';
 import { DENSITY_UNITS, LENGTH_UNITS, MASS_UNITS, VELOCITY_UNITS } from './units';
 
 
@@ -628,6 +628,7 @@ export const PART_OPTIONS: Record<PartKind, PartOption> = {
           P({ path: 'beta', label: 'Plasma beta', tip: 'Gas pressure over magnetic pressure B² / 2 at the center (or β_M): the larger, the weaker the field', control: num(1, 1e12, { factor: 10 }), default: 1000 }),
           P({ path: 'seed', label: 'Random seed', tip: 'Which random field: each seed gives another', control: num(1, 9999, { integer: true, step: 1 }), default: 1 }),
           P({ path: 'cut', label: 'Field edge', tip: 'Dipole or random: the field is zero where the pressure is below this fraction of the central pressure; 0 takes it to the surface. Left empty, the star’s own: 1% for a white dwarf or a star from a table, the surface for a polytrope', control: num(0, 0.99, { step: 0.01 }) }),
+          P({ path: 'taper', label: 'Field profile', tip: 'Dipole or random: how the field falls off toward the surface. With the pressure, the plasma beta climbs steeply in the outer layers (as 1 / p); with its square root, the beta stays about what it is at the center, out to the field’s edge, as in Guillochon & McCourt’s fields', control: pickOf(STAR_FIELD_TAPERS, ['pressure', 'With the pressure'], ['sqrt', 'With √p (even beta)']), default: 'pressure' }),
         ] } }),
     ],
   },
