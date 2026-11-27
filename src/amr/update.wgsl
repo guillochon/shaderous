@@ -461,7 +461,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(workgroup_id) wi
   if (self_gravity) { g += textureLoad(G, c, 0).xyz; }
   // The point masses' pull and the frame's: kicked with the rest, its energy always in kick
   // form (gravity/ext.wgsl).
-  let gx = ext_accel(blk_pos(slot, l));
+  let gx = ext_accel_wb(blk_pos(slot, l), blk_dx(slot));
   // (A rotating frame's centrifugal force is part of gx, with or without point masses.)
   // (With implicit pressure a uniform field's kick is the pressure passes': amr/pressure/faces.wgsl.)
   let gravity = !PSPLIT && (self_gravity || any(P.gext.xyz != vec3<f32>(0.0)) || ext_on());

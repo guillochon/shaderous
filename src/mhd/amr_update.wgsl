@@ -448,7 +448,7 @@ fn main(@builtin(local_invocation_index) lix: u32, @builtin(workgroup_id) wid: v
   let gravity = self_gravity || any(P.gext.xyz != vec3<f32>(0.0));
   var g = P.gext.xyz;
   if (self_gravity) { g += textureLoad(G, x, 0).xyz; }
-  let gx = ext_accel(blk_pos(g_slot, t));
+  let gx = ext_accel_wb(blk_pos(g_slot, t), blk_dx(g_slot));
   // A rotating frame's centrifugal force alone (no self-gravity, no masses) also closes here.
   let late_ext = !self_gravity && ext_on();
   var kick = vec3<f32>(0.0);

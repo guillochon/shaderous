@@ -81,6 +81,21 @@ fn bh_dphi(m: Mass, x: vec3<f32>, d: vec3<f32>, ahead: f32) -> f32 {
   return m.pos.w * dq / (r0 * r1 * (r0 + r1));
 }
 
+// A mass's pull on the gas of a cell of size h at x where the balanced reconstruction is on
+// (gravity/ext.wgsl ext_accel_wb): the centered difference of the potential's steps as the
+// reconstruction takes them (gravity/gfield.wgsl dphi_step), each from its lower cell up. An axis
+// the grid does not extend along keeps the pull at x.
+fn bh_accel_wb(x: vec3<f32>, m: Mass, h: f32) -> vec3<f32> {
+  var g = bh_accel(x, m);
+  for (var a = 0; a < 3; a++) {
+    if (P.dims[a] == 1u) { continue; }
+    var e = vec3<f32>(0.0);
+    e[a] = h;
+    g[a] = -(bh_dphi(m, x, e, 0.0) + bh_dphi(m, x - e, e, 0.0)) / (2.0 * h);
+  }
+  return g;
+}
+
 // Potential of a mass that has moved on by `ahead` (the half-step extrapolation).
 fn bh_phi(x: vec3<f32>, m: Mass, ahead: f32) -> f32 {
   let d = x - (m.pos.xyz + ahead * m.vel.xyz);

@@ -29,6 +29,27 @@ fn ext_accel(x: vec3<f32>) -> vec3<f32> {
   return g;
 }
 
+// The same for a cell of size h whose pressure the balanced reconstruction holds against the
+// potential's differences (hydro/q.wgsl; P.flags bit 3): the masses' pull as the centered
+// difference of the potential those differences take, -(phi(x + h) - phi(x - h)) / 2h along each
+// axis (bh_dphi), not as the pull at x. The reconstruction makes a cell's two face pressures
+// differ by rho times that difference, and the kick balances them only if it is the same:
+// with the pull at x the two differed by rho phi''' h^2 / 6, which drove gas at rest about a
+// softened mass at Mach 2e-3 already where the potential was a hundredth of c^2 deep and its
+// softening a cell (hydro-proofs' point-mass map, isothermal_plummer). The rest of the
+// acceleration is the frame's (uniform), a rotating frame's and a shearing box's (quadratic, whose
+// centered difference is the pull at x) and the Euler force (no potential).
+fn ext_accel_wb(x: vec3<f32>, h: f32) -> vec3<f32> {
+  if (!ext_on()) { return vec3<f32>(0.0); }
+  if ((P.flags & 8u) == 0u) { return ext_accel(x); }
+  var g = -BH.frame.xyz;
+  if (P.rot.w != 0.0) { g += rot_accel(x); }
+  if (BH.track.y != 0.0) { g += BH.track.y * vec3<f32>(x.y, -x.x, 0.0); }
+  if (P.shear.w != 0.0) { g += tidal_accel(x); }
+  for (var i = 0u; i < mass_count(); i++) { g += bh_accel_wb(x, BH.list[i], h); }
+  return g;
+}
+
 // phi(x + d) - phi(x) for the masses (moved on by `ahead`) and the frame, whose acceleration a
 // acts as a uniform field -a of potential a . x (each mass's part: gravity/bh.wgsl bh_dphi).
 fn ext_dphi(x: vec3<f32>, d: vec3<f32>, ahead: f32) -> f32 {

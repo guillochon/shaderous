@@ -133,7 +133,7 @@ fn main(
         if (RAD_RATE) { rate = max(rate, P.cfl * P.geom.y * P.rad.y / (P.rad2.x * P.rad2.y)); }
         var g = P.gext.xyz;
         if (P.grav_on != 0u) { g += textureLoad(G, c, 0).xyz; }
-        g += ext_accel(blk_pos(inv.slot, inv.l));
+        g += ext_accel_wb(blk_pos(inv.slot, inv.l), g_dx);
         var acc = length(g);
         // Implicit pressure for a gas: the solved pressure's own acceleration, less the field's
         // that balances it in gas at rest, limits the step too (hydro/rates.wgsl has why).

@@ -10,7 +10,7 @@ fn has_gravity() -> bool {
 
 // Acceleration at an in-range cell.
 fn g_load(c: vec3<i32>) -> vec3<f32> {
-  return g_self(c) + ext_accel(cell_pos(c));
+  return g_self(c) + ext_accel_wb(cell_pos(c), P.dx);
 }
 // The same without the point masses and the frame: self-gravity and the uniform field, whose
 // work the flux form accounts for.

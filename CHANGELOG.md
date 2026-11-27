@@ -88,6 +88,17 @@ What changed in each release of Shaderous. A release's section here is the body 
 
 ### Fixed
 
+- **Gas at rest about a point mass stays at rest.** The point masses' pull on the gas was taken
+  at each cell's center, while the balanced reconstruction holds a cell's pressure against the
+  differences of their potential between cells: the two differed by a third derivative of the
+  potential times dx^2, which stirred an isothermal atmosphere about a mass softened over one cell
+  to Mach 2e-3 where the potential was only a hundredth of c^2 deep, and to Mach 0.1 at one c^2
+  (the point-mass map of hydro-proofs). Wherever the balanced reconstruction is on, the kick is
+  now the centered difference of those same potential differences, on the uniform grid, on
+  blocks and with a field, and the masses are given back the same: the atmosphere stays below
+  Mach 1e-6 at a hundredth of c^2 and 4e-5 at one c^2.
+- **A movie's frame holds no longer touch the clock.** Banking a held step, of no length, folded
+  the compensation of the clock's summation into its time.
 - **Stars load in seconds.** A white dwarf's initial conditions asked the tabulated equation of
   state for the same ambient gas's energy in every cell (91% of a 0.6 M☉ dwarf's box at 128³):
   it now remembers its last answers, exactly, and a run with species keeps one equation of state

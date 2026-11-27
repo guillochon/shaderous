@@ -205,7 +205,7 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_index) 
     gpos = atl(blk_origin(inv.slot), clamp(inv.l, vec3<i32>(0), vec3<i32>(BS - 1)));
   }
   // The point masses' pull at the cell predicted (gravity/ext.wgsl), which the field atlas leaves out.
-  var pr = predict_cell(slot, l, mask, grav_at(gpos) + ext_accel(blk_pos(slot, l)));
+  var pr = predict_cell(slot, l, mask, grav_at(gpos) + ext_accel_wb(blk_pos(slot, l), blk_dx(slot)));
   if (at_source) { pr.a = vec4<f32>(pr.a.x, src_velocity(pr.a.yzw, s)); }
   let c = atl(blk_origin(inv.slot), inv.l);
   textureStore(PA, c, pr.a);

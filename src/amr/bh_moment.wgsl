@@ -36,7 +36,8 @@ fn rc_face(b: Mass, xlo: vec3<f32>, xhi: vec3<f32>, a: i32, h: f32) -> f32 {
 // has why; amr/pressure/faces_gas.wgsl ap_gface is what this follows, kind for kind).
 fn bh_pull(x: vec3<f32>, b: Mass) -> vec3<f32> {
   let at = bh_accel(x, b);
-  if (!(P.ohm.y > 0.0)) { return at; }
+  // (Explicitly, with the balanced reconstruction: the centered difference the gas was kicked by.)
+  if (!(P.ohm.y > 0.0)) { return select(at, bh_accel_wb(x, b, blk_dx(g_rc.w)), (P.flags & 8u) != 0u); }
   let slot = g_rc.w;
   let l = g_rc.xyz;
   let h = blk_dx(slot);

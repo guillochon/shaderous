@@ -65,7 +65,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     u2 = left.u2 + vec4<f32>(emag, 0.0, 0.0, 0.0);
   }
 
-  let kx = 0.5 * g_dt * u1.x * ext_accel(blk_pos(inv.slot, inv.l));
+  let kx = 0.5 * g_dt * u1.x * ext_accel_wb(blk_pos(inv.slot, inv.l), blk_dx(inv.slot));
   let kick = 0.5 * g_dt * u1.x * (P.gext.xyz + textureLoad(G, c, 0).xyz) + kx;
   var mom = u1.yzw + kick;
   var E = u2.x;

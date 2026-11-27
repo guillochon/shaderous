@@ -39,10 +39,14 @@ fn main() {
   // Bank the step that has just been taken (Kahan summation keeps t accurate in float32).
   if (BANK) {
     let prev = clock.dt;
-    let k = kahan1(clock.t, clock.tc, prev);
-    clock.t = k.x;
-    clock.tc = k.y;
-    if (prev > 0.0) { clock.steps += 1.0; }
+    // (Not a held step, of no length (a movie's frame, below): banking nothing would fold the
+    // compensation into t, and a recorded run's clock would differ from the unrecorded one's.)
+    if (prev > 0.0) {
+      let k = kahan1(clock.t, clock.tc, prev);
+      clock.t = k.x;
+      clock.tc = k.y;
+      clock.steps += 1.0;
+    }
     // The scale factor where that step ended.
     if (cosmo_on()) { clock.a = clock.a1; }
     // A shearing box: its x faces' offset along y moves on by q Omega L dt (Kahan summation, as

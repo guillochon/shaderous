@@ -66,7 +66,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   var rf = vec4<f32>(0.0);
   if (REF_DEV) { rf = ref_at(c); }
   let rho = u1.x + rf.x;
-  let kx = 0.5 * clock.dt * u1.x * ext_accel(cell_pos(c));
+  let kx = 0.5 * clock.dt * u1.x * ext_accel_wb(cell_pos(c), P.dx);
   let kick = 0.5 * clock.dt * u1.x * g_self(c) + kx;
   var mom = u1.yzw + kick;
   var E = u2.x;

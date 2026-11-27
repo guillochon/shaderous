@@ -115,7 +115,7 @@ fn main(
         let rate = abs(w.w1.y) + abs(w.w1.z) + abs(w.w1.w) + P.geom.y * cf + diff_speed(w.w1.x, w.w2.w);
         atomicMax(&wg_max[0], bitcast<u32>(rate / g_dx));
         // The acceleration limits the step too (hydro/clock.wgsl), per cell size.
-        var g = P.gext.xyz + ext_accel(blk_pos(slot, l));
+        var g = P.gext.xyz + ext_accel_wb(blk_pos(slot, l), blk_dx(slot));
         if (P.grav_on != 0u) { g += textureLoad(G, c, 0).xyz; }
         atomicMax(&wg_max[1], bitcast<u32>(length(g) / g_dx));
       }

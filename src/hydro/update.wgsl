@@ -363,7 +363,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(workgroup_id) wi
   // (With implicit pressure the uniform field's kick is the pressure passes': it has to be
   // formed on the faces, where the pressure difference that balances it is. pressure/correct.wgsl.)
   if (!PSPLIT && (has_gravity() || ext_on())) {
-    let kx = 0.5 * clock.dt * u1.x * ext_accel(cell_pos(c));
+    let kx = 0.5 * clock.dt * u1.x * ext_accel_wb(cell_pos(c), P.dx);
     kick = 0.5 * clock.dt * u1.x * g_self(c) + kx;
     let ke = select(kx, kick, !flux_work);
     // (The kick is (rho - rho_ref) g for a gas stored as its deviation from a reference, its

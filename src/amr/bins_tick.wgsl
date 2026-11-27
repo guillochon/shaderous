@@ -15,11 +15,14 @@ override CYCLE: u32 = 8u;   // substeps per cycle
 fn main() {
   if (MODE == 0u) {
     // Kahan summation keeps t accurate in float32 (as in hydro/clock.wgsl).
+    // (Not a held substep, of no length: hydro/clock.wgsl has why.)
     let prev = clock.dt;
-    let k = kahan1(clock.t, clock.tc, prev);
-    clock.t = k.x;
-    clock.tc = k.y;
-    if (prev > 0.0) { clock.steps += 1.0; }
+    if (prev > 0.0) {
+      let k = kahan1(clock.t, clock.tc, prev);
+      clock.t = k.x;
+      clock.tc = k.y;
+      clock.steps += 1.0;
+    }
   } else {
     BIN[0] = (BIN[0] + 1u) % CYCLE;
     atomicStore(&CNT[0], 0u);

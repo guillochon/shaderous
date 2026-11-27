@@ -282,7 +282,7 @@ fn cell_step(t: vec3<i32>, tf: vec3<i32>, bc: vec3<f32>, axes: i32, dt: f32, dtd
   var dw = 0.0;
   if (has_gravity() || ext_on()) {
     let w = select(0.5 * dt, dt, STAGE == 1u);
-    let kx = w * u1.x * ext_accel(cell_pos(t));
+    let kx = w * u1.x * ext_accel_wb(cell_pos(t), P.dx);
     kick = w * u1.x * g_self(t) + kx;
     let flux_work = STAGE == 2u && has_gravity() && (P.flags & 1u) != 0u;
     if (flux_work) {

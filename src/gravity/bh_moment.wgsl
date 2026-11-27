@@ -15,9 +15,11 @@
 // axis (pressure/kick.wgsl), and this is that, face for face, from the advected state the
 // correction kicked: the masses are then given back exactly what the gas was given
 // (gravity/bh_kick.wgsl), and the momentum of the two together is conserved to round-off.
+// Explicitly, with the balanced reconstruction, it is the centered difference the gas was kicked
+// by (gravity/ext.wgsl ext_accel_wb), for the same reason.
 fn bh_pull(x: vec3<f32>, b: Mass) -> vec3<f32> {
   let at = bh_accel(x, b);
-  if (!(P.ohm.y > 0.0)) { return at; }
+  if (!(P.ohm.y > 0.0)) { return select(at, bh_accel_wb(x, b, P.dx), (P.flags & 8u) != 0u); }
   let c = g_rc.xyz;
   let n = vec3<i32>(P.dims.xyz);
   var g = vec3<f32>(0.0);
