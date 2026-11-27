@@ -11,6 +11,7 @@ also changes the number of ions, n_i = sum Y_i per atomic mass unit, each holdin
 as the simulator has it: the energy added to the gas's, and T read back with the new ions.
 """
 import importlib.util
+import time
 from pathlib import Path
 
 import numpy as np
@@ -43,7 +44,13 @@ def cv(Y, rho, T):
     return float(de) / T
 
 
-def _rhs(t, s, rho):
+class BurnTimeout(RuntimeError):
+    """A burn that took longer than its wall-clock limit (burn's wall)."""
+
+
+def _rhs(t, s, rho, deadline=None):
+    if deadline is not None and time.monotonic() > deadline:
+        raise BurnTimeout(f"burn past its wall-clock limit at t = {t:.3e} s")
     Y = np.maximum(s[:N], 0.0)
     T = min(max(s[N], 1e7), T_MAX)
     dY = net.rhs(t, Y, rho, T, screen5)
@@ -52,12 +59,15 @@ def _rhs(t, s, rho):
     return np.append(dY, (eps - 1.5 * KB * T / MU * float(np.sum(dY))) / cv(Y, rho, T))
 
 
-def burn(X, rho, T, dt, rtol=1e-7, atol=1e-12, t_eval=None):
+def burn(X, rho, T, dt, rtol=1e-7, atol=1e-12, t_eval=None, wall=None):
     """Burn mass fractions X for dt seconds at density rho, starting at temperature T.
-    Returns (X, T, e) at dt, e the energy released per gram (or arrays over t_eval)."""
+    Returns (X, T, e) at dt, e the energy released per gram (or arrays over t_eval).
+    wall: a limit in seconds of wall-clock time, past which BurnTimeout is raised (a solver
+    that crawls on a stiff state otherwise holds up every pool that waits for it in order)."""
+    deadline = None if wall is None else time.monotonic() + wall
     Y0 = np.asarray(X, dtype=np.float64) / A
     s0 = np.append(Y0, T)
-    sol = solve_ivp(_rhs, (0.0, dt), s0, method="BDF", args=(rho,), rtol=rtol,
+    sol = solve_ivp(_rhs, (0.0, dt), s0, method="BDF", args=(rho, deadline), rtol=rtol,
                     atol=np.append(np.full(N, atol), 1.0), t_eval=t_eval)
     if not sol.success:
         raise RuntimeError(sol.message)

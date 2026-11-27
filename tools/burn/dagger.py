@@ -22,11 +22,17 @@ import train
 from gen_data import TIMES, workers
 
 
+def init():
+    """Each worker compiles the network (numba, 30-80 s) before any burn's wall-clock limit."""
+    import burner
+    burner.burn(burner.composition(c12=0.5, o16=0.5), 1e7, 3e9, 1e-6)
+
+
 def burn_one(args):
     import burner
     rho, T, X = args
-    try:
-        Xs, Ts, _ = burner.burn(X, rho, T, TIMES[-1], t_eval=TIMES)
+    try:   # a state the solver crawls through is dropped after a minute, as reburn.py does
+        Xs, Ts, _ = burner.burn(X, rho, T, TIMES[-1], t_eval=TIMES, wall=60)
     except Exception:  # noqa: BLE001
         return None
     return rho, Xs.T, Ts
@@ -66,7 +72,7 @@ def main():
     jobs = list(zip(r[idx].astype(float), Ts[idx].astype(float), Xs))
     print(f"rolled out in {time.time() - t0:.0f} s; burning {len(jobs)} visited states", flush=True)
     out = []
-    with Pool(workers()) as pool:
+    with Pool(workers(), initializer=init) as pool:
         for k, res in enumerate(pool.imap_unordered(burn_one, jobs, chunksize=4)):
             if res is not None:
                 out.append(res)

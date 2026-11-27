@@ -6,8 +6,8 @@ their place.
 
     tools/burn/.venv/Scripts/python tools/burn/reburn.py [file ...]   (default: everything)
 
-Below-normal priority, all cores but two (gen_data.workers). A trajectory whose burn fails is
-dropped, with its row of every other array.
+Below-normal priority, all cores but two (gen_data.workers). A trajectory whose burn fails, or
+takes more than WALL seconds, is dropped, with its row of every other array.
 """
 import sys
 import time
@@ -24,14 +24,20 @@ HERE = Path(__file__).parent
 OLD = HERE / "data_old"
 
 
+WALL = 60.0   # seconds of wall-clock time a burn may take before it is dropped
+
+
 def init():
     psutil.Process().nice(psutil.BELOW_NORMAL_PRIORITY_CLASS)
+    # Compile the network (numba, 30-80 s) before any burn's wall-clock limit starts.
+    burner.burn(burner.composition(c12=0.5, o16=0.5), 1e7, 3e9, 1e-6)
 
 
 def burn_one(args):
     rho, X0, T0, t = args
     try:
-        X, T, _ = burner.burn(np.clip(X0, 0, None) / np.clip(X0, 0, None).sum(), rho, T0, t[-1], t_eval=t)
+        X, T, _ = burner.burn(np.clip(X0, 0, None) / np.clip(X0, 0, None).sum(), rho, T0, t[-1], t_eval=t,
+                              wall=WALL)
         return X.T, T
     except Exception:   # noqa: BLE001 - dropped, and counted
         return None
@@ -42,7 +48,7 @@ def run(pool, jobs, label):
     out = []
     for k, r in enumerate(pool.imap(burn_one, jobs, chunksize=4)):
         out.append(r)
-        if (k + 1) % 2000 == 0:
+        if (k + 1) % 500 == 0:
             print(f"  {label}: {k + 1}/{len(jobs)} in {time.time() - t0:.0f} s", flush=True)
     return out
 
