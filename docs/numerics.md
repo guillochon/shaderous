@@ -1964,7 +1964,12 @@ than 10 ms is split into network steps.
   are in the docstrings of `weightprog/twounit.py`, `rateedit.py` and `lpedit3.py`.
 - **Limiter.** Optionally, no cell takes in burning energy faster than $`f_b\,e/t_s`$
   ([Kushnir et al. 2013][Kushnir2013]); each network step is then scaled down as a whole.
-  Off by default.
+  Off by default. It spreads the burning over about $`\Delta x/f_b`$, and holds where that is
+  much smaller than every other length of the problem ([Kushnir & Katz 2020][KushnirKatz2020]).
+  A detonation then has to be lit over a region about $`\Delta x/f_b`$ across
+  ([Kushnir, Wygoda & Sharon 2020][Kushnir2020], Sec. 2.2): in the C/O tube at $`f_b = 0.05`$
+  the default layer at $`4\times10^9`$ K drives only a shock, up to 200 km wide, while a layer at
+  $`8\times10^9`$ K lights a detonation at the unlimited speed.
 - **Heating rate.** The burn pass writes each cell's energy released over the step, divided by
   the step, to a texture of its own: the view "Nuclear heating" (per unit volume) and the
   diagnostic L nuc (summed over the gas) read it.
@@ -4034,6 +4039,8 @@ two levels of blocks (the test's threshold is 1e-4).
 [Koyama2004]: https://doi.org/10.1086/382478
 [Krumholz2004]: https://doi.org/10.1086/421935
 [Kushnir2013]: https://doi.org/10.1088/2041-8205/778/2/L37
+[Kushnir2020]: https://doi.org/10.1093/mnras/staa3017
+[KushnirKatz2020]: https://doi.org/10.1093/mnras/staa594
 [Lohner1987]: https://doi.org/10.1016/0045-7825(87)90098-3
 [Plewa1999]: https://arxiv.org/abs/astro-ph/9807241
 [Plummer1911]: https://doi.org/10.1093/mnras/71.5.460
@@ -4110,6 +4117,9 @@ two levels of blocks (the test's threshold is 1e-4).
 - Koyama, H., & Inutsuka, S. (2002). An Origin of Supersonic Motions in Interstellar Clouds. ApJL 564, L97. [doi:10.1086/338978](https://doi.org/10.1086/338978)
 - Koyama, H., & Inutsuka, S. (2004). The Field Condition: A New Constraint on Spatial Resolution in Simulations of the Nonlinear Development of Thermal Instability. ApJL 602, L25. [doi:10.1086/382478](https://doi.org/10.1086/382478)
 - Krumholz, M. R., McKee, C. F., & Klein, R. I. (2004). Embedding Lagrangian Sink Particles in Eulerian Grids. ApJ 611, 399. [doi:10.1086/421935](https://doi.org/10.1086/421935)
+- Kushnir, D., Katz, B., Dong, S., Livne, E., & Fernández, R. (2013). Head-on Collisions of White Dwarfs in Triple Systems Could Explain Type Ia Supernovae. ApJL 778, L37. [doi:10.1088/2041-8205/778/2/L37](https://doi.org/10.1088/2041-8205/778/2/L37)
+- Kushnir, D., & Katz, B. (2020). An accurate and efficient numerical calculation of detonation waves in multidimensional supernova simulations using a burning limiter and adaptive quasi-statistical equilibrium. MNRAS 493, 5413. [doi:10.1093/mnras/staa594](https://doi.org/10.1093/mnras/staa594)
+- Kushnir, D., Wygoda, N., & Sharon, A. (2020). Sub-Chandrasekhar-mass detonations are in tension with the observed t0-M_Ni56 relation of type Ia supernovae. MNRAS 499, 4725. [doi:10.1093/mnras/staa3017](https://doi.org/10.1093/mnras/staa3017)
 - Kwatra, N., Su, J., Grétarsson, J. T., & Fedkiw, R. (2009). A method for avoiding the acoustic time step restriction in compressible flow. Journal of Computational Physics 228, 4146. [doi:10.1016/j.jcp.2009.02.027](https://doi.org/10.1016/j.jcp.2009.02.027)
 - Löhner, R. (1987). An adaptive finite element scheme for transient problems in CFD. Computer Methods in Applied Mechanics and Engineering 61, 323. [doi:10.1016/0045-7825(87)90098-3](https://doi.org/10.1016/0045-7825(87)90098-3)
 - Masunaga, H., & Inutsuka, S. (2000). A Radiation Hydrodynamic Model for Protostellar Collapse. II. The Second Collapse and the Birth of a Protostar. ApJ 531, 350. [doi:10.1086/308439](https://doi.org/10.1086/308439)

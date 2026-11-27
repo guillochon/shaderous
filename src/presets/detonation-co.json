@@ -95,7 +95,7 @@
       "path": "physics.burn.limiter",
       "id": "limiter",
       "label": "Burning limiter f",
-      "tip": "No cell takes in burning energy faster than f times its internal energy per sound crossing of the cell (Kushnir et al. 2013): on a grid far coarser than the burning, faster heating is numerically unstable and lights detonations too early. They use 0.1, but here anything under about 0.2 stops even resolved detonations, and on cells of hundreds of km it suppresses the collision detonation; 0 switches it off (the default). Changing it starts the run again",
+      "tip": "No cell takes in burning energy faster than f times its internal energy per sound crossing of the cell (Kushnir et al. 2013): on a grid far coarser than the burning, faster heating is numerically unstable and lights detonations too early. Kushnir and coworkers use 0.05 to 0.1. With it, a detonation has to be lit over a region about dx/f across (Kushnir, Wygoda & Sharon 2020): the default 4e9 K layer then drives only a shock that does not ignite, while an 8e9 K layer lights a detonation that runs at the unlimited speed. It applies only where dx/f is much smaller than every other scale of the problem (Kushnir & Katz 2020). 0 switches it off (the default). Changing it starts the run again",
       "min": 0,
       "max": 1,
       "step": 0.05

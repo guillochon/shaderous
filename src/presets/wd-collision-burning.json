@@ -61,7 +61,7 @@
       "path": "physics.burn.limiter",
       "id": "limiter",
       "label": "Burning limiter f",
-      "tip": "No cell takes in burning energy faster than f times its internal energy per sound crossing of the cell (Kushnir et al. 2013): on a grid far coarser than the burning, faster heating is numerically unstable and lights detonations too early. They use 0.1, but here anything under about 0.2 stops even resolved detonations, and on cells of hundreds of km it suppresses the collision detonation; 0 switches it off (the default). Changing it starts the run again",
+      "tip": "No cell takes in burning energy faster than f times its internal energy per sound crossing of the cell (Kushnir et al. 2013): on a grid far coarser than the burning, faster heating is numerically unstable and lights detonations too early. It applies only where dx/f is much smaller than every other scale of the problem (Kushnir & Katz 2020). On this preset's cells of hundreds of km, dx/f at f = 0.1 is larger than the stars, so with the limiter on the run is unresolved and hardly burns. 0 switches it off (the default). Changing it starts the run again",
       "min": 0,
       "max": 1,
       "step": 0.05

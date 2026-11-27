@@ -83,7 +83,8 @@ Numbers that `edits/code-catchup.py` adds to the manuscript. "numerics" is `docs
 | Network: layers, units, DAgger rounds, half-precision weights | 4 x 128; round 30 | commit `6f68adb`; `src/burn/network.ts` |
 | Network: GPU against float64 mirror | within 2% (L1) on 48 held-out states | `burn-network` test |
 | Network: least temperature and density that burn; longest network step | 1e8 K, 1e4 g/cm^3; 10 ms | `src/burn/network.ts` |
-| Burning limiter: tube detonations 0.5 to 4 km; collision of two 0.64 M_sun dwarfs on 940 km cells | f < 0.2 stops detonations, f >= 0.3 matches; Ni56 0.45 M_sun unlimited, 0.008 and 0.056 at f = 0.1 and 0.4 | commit `4c1667e` |
+| Burning limiter in the C/O tube (1e7 g/cm^3, 2 km cells, front speed from the pressure jump at t = 0.02-0.06 s) | 4e9 K layer: f = 0.05 and 0.1 drive only a shock (5000-6400 km/s) for layers 15-200 km; f = 0.2 fails only at 15 km; f = 0.4 detonates. 8e9 K layer: every f 0.05-0.4 and every layer detonates, within 1% of the unlimited front from the same layer (11,900-13,600 km/s) | 2026-11-27 sweep, `runs/kush/tube` (detonation-co, n = 512), `tools/burn/limiter/tube.sh`, `front.py`; replaces the reading of commit `4c1667e` (Kushnir's feedback) |
+| Collision of two 0.64 M_sun dwarfs, tabulated EOS (Ni56 at t = 8, before gas leaves the box) | 0.63 M_sun default (CFL 0.8, 940 km cells); 0.68 and 0.73 at CFL 0.6 and 0.4; 0.04 on 1880 km cells; 0.06 and 0.19 with f = 0.1 and 0.4 | 2026-11-27 runs at `bdbc31e`, `runs/kush/coll2`, `tools/burn/limiter/collision.sh`, `nimass.py` |
 | Point masses in kick form: entropy of the disrupted n = 3 star | cut a hundredfold in flux form; holds to about 0.1 dex (0.12) | numerics §14; commits `3cd1a52`, `74aec88` |
 | n = 3 star of Gamma = 5/3 gas: destroyed between beta | 1.8 and 2 (against 1.85 of Guillochon & Ramirez-Ruiz 2013) | commit `74aec88` |
 | Face-flux tile: speed-up of the largest uniform grids on an Apple M4 Pro; cost of not splitting the update | 1.3 to 1.5 times; about 10% | `docs/architecture.md`, "Performance notes" |
@@ -117,7 +118,7 @@ Every figure's simulations were run again with its script (`--run`) on the RTX 3
 | Throughput on the RTX 3080 12GB in Chrome 156 and Firefox 160 | from `paper/figures/data/performance/throughput.json` and `throughput_firefox.json` via `make_performance.py` (its printed table gives every point, its range over three passes and the time per step); measured with the GPU otherwise idle | `make_performance.py --run [--firefox]` at `6fbf2cb` with the working tree's `throughput` (timed again with more steps while a timing is under a second) |
 | Shaderous against AthenaK per unit of bandwidth, 256^3 | 1.52e6 per GB/s against 3.01e5 to 3.95e5: 3.9 to 5.1 times (quoted as 4 to 5) | `make_performance.py` output |
 | Firefox against Chrome | largest uniform grids 1.63e9 against 1.85e9 (2048^2) and 1.38e9 against 1.39e9 (256^3); adaptive 1.5 to 7.3 times fewer; ms per step 1.9 to 2.5 (2D) and 4.0 to 4.6 (3D) against 0.33 to 0.77 and 1.9 to 3.7 | same |
-| Nickel from the collision of two 0.64 M_sun dwarfs with the tabulated equation of state | 0.61 M_sun | no record of the run was found in the repository on 2026-11-15; with a network still trained on the first equation of state's heating. Measure again after the retraining |
+| Nickel from the collision of two 0.64 M_sun dwarfs with the tabulated equation of state | 0.61 M_sun (superseded: 0.63 M_sun on 2026-11-27, see the burning limiter rows) | no record of the run was found in the repository on 2026-11-15; with a network still trained on the first equation of state's heating |
 
 ## Validation run again after the accuracy changes (2026-11-19)
 
