@@ -22,6 +22,11 @@
 # Jupyter: commands go in through Runpod's exec (exec-pod), and the container just stays up.
 FROM python:3.12-slim
 
+# A C compiler, which Triton needs to build the kernels of torch.compile (train.py's
+# BURN_COMPILE=1, for the unrolled term); the slim image has none.
+RUN apt-get update && apt-get install -y --no-install-recommends gcc libc6-dev \
+ && rm -rf /var/lib/apt/lists/*
+
 # torch and its CUDA libraries in several layers, not one: a host downloads up to three
 # layers at once, and a single 4 GB layer came down in one stream for over 10 minutes. pip
 # resolves the exact set first; each group is then installed in a layer of its own.
