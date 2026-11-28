@@ -8,6 +8,9 @@ import { decodeLink, encodeLink, viewDefaults } from '../../src/ui/link';
 import { driveModes } from '../../src/hydro/drive';
 import { configFor, lineGravity, onBlocks, oneDimUnsupported, refusal } from '../../src/sim';
 import { mapWindow } from '../../src/render/renderer';
+import { gridBytes, leafIndexBytes } from '../../src/create';
+import { AmrSim } from '../../src/amr/amr_sim';
+import { initialFaces } from '../../src/mhd/mhd';
 import { problemById } from '../../src/problems';
 import { defaultOpacity } from '../../src/render/transfer';
 import { factsOf, OPTIONS, unavailable } from '../../src/setup/options';
@@ -140,7 +143,37 @@ describe('uniform 1D grids past a texture\'s side', () => {
     expect(onBlocks(c(2048))).toBe(false);
     expect(onBlocks(c(4096))).toBe(true);
     expect(onBlocks(c(262144))).toBe(true);
-    expect(onBlocks(configFor(problemById('sod-x'), 4096, { ndim: 2 }))).toBe(false);
+    expect(onBlocks(configFor(problemById('sod-x'), 256, { ndim: 3 }))).toBe(false);
+  });
+});
+
+describe('a 1D magnetic field', () => {
+  it('keeps two rows of faces and the same b_x on every x face', () => {
+    const c = configFor(problemById('brio-wu'), 64, { ndim: 1 });
+    // A potential whose b_x = dA_z/dy grows along x: not divergence-free in 1D as it is.
+    const cfg = { ...c, problem: { ...c.problem, mhd: { potential: () => (x: number, y: number) => [0, 0, (1 + x) * y] as [number, number, number] } } };
+    const f = initialFaces(cfg, 64, 1, 1 / 64);
+    expect(f.length).toBe(65 * 2 * 4);
+    const bx = Array.from({ length: 65 }, (_, i) => f[4 * i]);
+    expect(Math.max(...bx) - Math.min(...bx)).toBeLessThan(1e-6);
+    expect(bx[0]).toBeCloseTo(1, 1);
+  });
+});
+
+describe("uniform 2D grids past a texture's side", () => {
+  it('run on blocks with no levels', () => {
+    expect(onBlocks(configFor(problemById('sod-x'), 2048, { ndim: 2 }))).toBe(false);
+    expect(onBlocks(configFor(problemById('sod-x'), 4096, { ndim: 2 }))).toBe(true);
+    expect(refusal(configFor(problemById('kelvin-helmholtz'), 8192, { ndim: 2 }))).toBeNull();
+  });
+  it('refuses there what is on the uniform grid only', () => {
+    const c = configFor(problemById('kelvin-helmholtz'), 4096, { ndim: 2 });
+    expect(refusal({ ...c, problem: { ...c.problem, shear: { q: 1.5, omega: 1 } } } as never)).toMatch(/block grid is not available for a shearing box/);
+    expect(refusal({ ...c, reference: 'uniform' } as never)).toMatch(/uniform grid only/);
+  });
+  it('counts their memory by their blocks', () => {
+    expect(gridBytes(4096, 2, 0)).toBeGreaterThan(4096 ** 2 * 16);
+    expect(gridBytes(4096, 2, 0)).toBe((4096 / 16) ** 2 * AmrSim.blockBytes(2) + leafIndexBytes(4096, 2));
   });
 });
 
@@ -206,7 +239,10 @@ describe('1D configuration', () => {
       expect(refusal(configFor(p, 1024, { ndim: 1 }))).toBeNull();
       expect(refusal(configFor(p, 1024, { ndim: 1, amrLevels: 2 }))).toMatch(/uniform grid only/);
       expect(refusal(configFor(p, 4096, { ndim: 1 }))).toMatch(/uniform grid only/);
+      // (Its faces need n + 1 texels along x: 2048 cells would take 2049.)
+      expect(refusal(configFor(p, 2048, { ndim: 1 }))).toMatch(/at most 1024/);
     }
+    expect(refusal(configFor(problemById('orszag-tang'), 2048, { ndim: 2 }))).toMatch(/at most 1024/);
   });
   it('refuses what 1D does not take', () => {
     const c = configFor(problemById('sod-x'), 1024, { ndim: 1 });

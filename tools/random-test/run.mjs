@@ -12,6 +12,8 @@
 //   --seed S           first seed (default: from the clock); a row's seed reproduces its setup
 //   --seeds A,B,C      these seeds instead
 //   --mode M           compose or preset, for every seed
+//   --dim D            every setup in D dimensions (1, 2 or 3); presets that do not take it are
+//                      not drawn
 //   --docs A.json,...  these setup documents instead of generated ones (a row's `doc`, edited:
 //                      for bisecting a failure)
 //   --steps N          steps per run (default 400)
@@ -41,6 +43,7 @@ const runs = Number(opt('runs', 48));
 const seed0 = Number(opt('seed', Date.now() % 1_000_000_000));
 const steps = Number(opt('steps', 400));
 const mode = opt('mode', undefined);
+const dim = opt('dim', undefined) ? Number(opt('dim', undefined)) : undefined;
 const out = path.resolve(opt('out', 'random-test-out'));
 const shotEvery = args.includes('--shot-all') ? 1 : Number(opt('shot-every', 8));
 const gpuMemory = opt('gpu-memory', '4');
@@ -56,7 +59,7 @@ const vite = await createServer({ configFile: path.join(REPO, 'vite.config.ts'),
 const gen = await vite.ssrLoadModule('/tools/random-test/generate.ts');
 const docFiles = opt('docs', undefined)?.split(',');
 const make = (seed, i) => {
-  if (!docFiles) return gen.generate(seed, mode ? { mode } : {});
+  if (!docFiles) return gen.generate(seed, { ...(mode ? { mode } : {}), ...(dim ? { ndim: dim } : {}) });
   const doc = JSON.parse(fs.readFileSync(docFiles[i], 'utf8'));
   return { seed: path.basename(docFiles[i]), mode: 'document', doc, tried: [], features: gen.featuresOf(doc), closed: gen.closedBox(doc) };
 };

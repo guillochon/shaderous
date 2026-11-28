@@ -30,8 +30,8 @@ import { DebrisBuffers, debrisSlot, debrisSpec, type DebrisLedger, type DebrisRe
 import { hydrogenParticles, materialEosParams, mixMoments, problemCoefficients, problemCompSlot, type Moments } from './species/mixture';
 import { cellField, initialFaces, MhdPasses, mhdOn, mhdUnsupported, type MagDiagnostics } from './mhd/mhd';
 import { compiledFrom } from './setup/compile';
-import { domainLo, gridDims, rectangular } from './domain';
-export { gridDims, rectangular } from './domain';
+import { domainLo, gridDims, onBlocks, rectangular, UNIFORM_TEXTURE } from './domain';
+export { gridDims, onBlocks, rectangular, UNIFORM_TEXTURE } from './domain';
 import { spherical, sphGrid, sphParams } from './spherical';
 import { hubble, omegaK, scaleFactor, type Cosmology } from './cosmo';
 import { codeLightSpeed, defaultOpacityParams, OPACITY_MODULES, packOpacity, physicalOpacity, type OpacityKind, type OpacityParams } from './opacity/opacity';
@@ -793,14 +793,6 @@ export function withSymmetry(cfg: SimConfig, want: readonly boolean[] | undefine
 }
 
 /**
- * The cells a uniform 1D grid holds in its own textures (a 3D texture's side): a uniform 1D run
- * past it runs on the block grid with no levels of refinement (onBlocks), the same cells.
- */
-export const UNIFORM_1D_TEXTURE = 2048;
-/** The run is on the block grid (AmrSim): adaptive, or a uniform 1D grid past UNIFORM_1D_TEXTURE. */
-export const onBlocks = (c: Pick<SimConfig, 'amrLevels' | 'ndim' | 'n'>): boolean => c.amrLevels > 0 || (c.ndim === 1 && c.n > UNIFORM_1D_TEXTURE);
-
-/**
  * A 1D run's self-gravity (plans/one-dimensional.md), the LINE constant of the monopole passes
  * (gravity/sph_monopole.wgsl, amr/sph_monopole.wgsl): 0 a spherical run's monopole, 1 a
  * Cartesian run's slabs (isolated), 2 the same in a periodic box, 3 an axisymmetric run's rings.
@@ -822,7 +814,7 @@ export function cylindricalUnsupported(c: SimConfig): string | null {
   if (c.problem.geometry !== 'cylindrical') return null;
   if (c.ndim === 3) return 'an axisymmetric run is two-dimensional, in (R, z), or one-dimensional, in R';
   if (c.amrLevels > 0 && c.timeBins > 0) return 'per-block timesteps are not available for axisymmetric runs yet';
-  if (c.problem.mhd && c.amrLevels > 0) return 'magnetic fields are not available for axisymmetric runs on blocks yet';
+  if (c.problem.mhd && onBlocks(c)) return `magnetic fields are not available for axisymmetric runs on blocks yet (so not past ${UNIFORM_TEXTURE} cells)`;
   if (c.problem.mhd && c.resistivity > 0) return 'resistivity is not available in axisymmetric runs yet';
   if (c.viscosity > 0) return 'viscosity is not available in axisymmetric runs yet (it needs the curvilinear stress)';
   for (const m of c.problem.masses?.(c.params, c.G, c.problem.box / c.n, c.ndim) ?? [])
@@ -847,7 +839,7 @@ export function cylindricalUnsupported(c: SimConfig): string | null {
 export function refusal(c: SimConfig): string | null {
   const why: [string, string | null][] = [
     ['One-dimensional run', oneDimUnsupported(c)],
-    ['MHD', mhdOn(c) ? mhdUnsupported(c) : null],
+    ['MHD', mhdOn(c) ? (uniformFieldTooBig(c) ?? mhdUnsupported(c)) : null],
     ['Liquid', c.eos === 'liquid' ? liquidUnsupported(c) : null],
     ['Implicit pressure', implicitPressure(c) ? implicitUnsupported(c) : null],
     ['Reference state', refUnsupported(c)],
@@ -866,6 +858,17 @@ export function refusal(c: SimConfig): string | null {
 }
 
 /**
+ * A magnetic field on the uniform grid keeps its faces in textures one texel longer than the
+ * grid along x (mhd/mhd.ts), and no side of a 3D texture may pass UNIFORM_TEXTURE: so 1024
+ * cells a side at most (a random 1D setup of 2048 cells failed to make its face textures).
+ */
+export const UNIFORM_FIELD_MAX = UNIFORM_TEXTURE / 2;
+function uniformFieldTooBig(c: SimConfig): string | null {
+  if (c.amrLevels > 0 || onBlocks(c) || c.n <= UNIFORM_FIELD_MAX) return null;
+  return `a magnetic field on the uniform grid takes at most ${UNIFORM_FIELD_MAX} cells a side (its faces need one more texel than a texture holds)${c.ndim === 1 ? '' : ': refine instead'}`;
+}
+
+/**
  * Why a 1D run (plans/one-dimensional.md) cannot go as configured, or null. Each module not
  * built for 1D yet says which phase of the plan brings it; some never apply in 1D.
  */
@@ -876,11 +879,11 @@ export function oneDimUnsupported(c: SimConfig): string | null {
   // (An obstacle of a box or a sphere is a solid interval of the row; a mesh has no 1D form.)
   if (c.cutCells) return 'partly filled cells do not apply in 1D: an obstacle fills whole cells of the row';
   if ((c.problem.setup?.parts ?? []).some((p) => (p.kind === 'obstacle' || p.kind === 'inflow' || p.kind === 'region') && p.shape.type === 'mesh')) return 'meshes do not apply in 1D';
-  // Magnetic fields and implicit pressure: on the uniform grid (up to UNIFORM_1D_TEXTURE cells),
+  // Magnetic fields and implicit pressure: on the uniform grid (up to UNIFORM_TEXTURE cells),
   // not yet on one-row blocks, whose face and edge passes and sub-block multigrid they need
   // (plans/one-dimensional.md).
   const blocks = onBlocks(c);
-  if (c.problem.mhd && blocks) return 'magnetic fields in 1D are on the uniform grid only, so far (2048 cells at most, no refinement)';
+  if (c.problem.mhd && blocks) return `magnetic fields in 1D are on the uniform grid only, so far (${UNIFORM_FIELD_MAX} cells at most, no refinement)`;
   // (Comoving coordinates go, with the periodic self-gravity of slabs: lineGravity. An
   // accelerating frame follows point masses, which a 1D run has but at a spherical run's center,
   // and an axisymmetric run has no rotating frame in 2D either.)
@@ -909,7 +912,7 @@ export const refOn = (c: SimConfig): boolean => c.reference !== 'off' && !refUns
 export function refUnsupported(c: SimConfig): string | null {
   if (c.reference === 'off') return null;
   if (c.eos !== 'ideal') return 'for the ideal gas only, so far';
-  if (c.amrLevels > 0) return 'on the uniform grid only, so far';
+  if (onBlocks(c)) return `on the uniform grid only, so far (${UNIFORM_TEXTURE} cells a side at most)`;
   if (implicitPressure(c)) return 'with explicit pressure only, so far';
   if (c.problem.mhd || radiationOn(c) || (c.problem.species?.length ?? 0) > 0) return 'not with a magnetic field, radiation or species, so far';
   if (c.problem.geometry || c.problem.shear || cosmologyOf(c) || (c.symmetry ?? []).some(Boolean)) return 'in Cartesian coordinates, without mirror symmetry, a shearing box or comoving coordinates';
@@ -937,7 +940,7 @@ export const cutOn = (c: SimConfig): boolean => c.cutCells && !!c.problem.obstac
 export function cutUnsupported(c: SimConfig): string | null {
   if (!c.cutCells) return null;
   if (c.eos !== 'liquid' || !implicitPressure(c)) return 'partly filled cells are for the liquid with implicit pressure, so far';
-  if (c.amrLevels > 0) return 'partly filled cells are on the uniform grid only, so far';
+  if (onBlocks(c)) return `partly filled cells are on the uniform grid only, so far (${UNIFORM_TEXTURE} cells a side at most)`;
   if (c.problem.moving?.length) return 'obstacles must be at rest, so far';
   if (c.problem.mhd || c.problem.geometry || (c.problem.species?.length ?? 0) > 0 || radiationOn(c)) return 'not with a magnetic field, species, radiation or curved coordinates';
   if ((c.symmetry ?? []).some(Boolean) || c.problem.shear || c.problem.cosmology) return 'not with mirror symmetry, a shearing box or comoving coordinates';
@@ -954,7 +957,7 @@ export const movingFractions = (c: SimConfig): boolean => !!c.problem.moving?.le
 export function movingUnsupported(c: SimConfig): string | null {
   const m = c.problem.moving;
   if (!m?.length) return null;
-  if (c.amrLevels > 0) return 'moving obstacles are on the uniform grid only, so far';
+  if (onBlocks(c)) return `moving obstacles are on the uniform grid only, so far (${UNIFORM_TEXTURE} cells a side at most)`;
   if (m.length > MAX_MOVING) return `at most ${MAX_MOVING} obstacles may move`;
   if (m.some((b) => b.shape.type !== 'sphere' && b.shape.type !== 'box')) return 'a moving obstacle must be a sphere or a box, so far';
   if (c.problem.mhd || c.problem.geometry || (c.problem.species?.length ?? 0) > 0 || radiationOn(c)) return 'not with a magnetic field, species, radiation or curved coordinates';
@@ -1081,7 +1084,7 @@ const COSTLY_EOS: readonly EosKind[] = ['gas_radiation', 'degenerate', 'ionizing
  * stores them, and the predictor).
  */
 export function primStored(c: SimConfig): boolean {
-  if (c.amrLevels > 0 || c.problem.mhd || cosmologyOf(c) || refOn(c)) return false;
+  if (onBlocks(c) || c.problem.mhd || cosmologyOf(c) || refOn(c)) return false;
   return c.storedPrims ?? COSTLY_EOS.includes(c.eos);
 }
 
@@ -1112,7 +1115,7 @@ export function cosmologyUnsupported(c: SimConfig): string | null {
 export function shearUnsupported(c: SimConfig): string | null {
   const s = c.problem.shear;
   if (!s) return null;
-  if (c.amrLevels > 0) return 'the adaptive mesh is not available for a shearing box (a block\u2019s neighbors across the boundary change with time)';
+  if (onBlocks(c)) return `the block grid is not available for a shearing box (a block\u2019s neighbors across the boundary change with time), so neither refinement nor more than ${UNIFORM_TEXTURE} cells a side`;
   if (c.problem.mhd && (c.resistivity > 0 || c.viscosity > 0)) return 'resistivity and viscosity are not available in a magnetized shearing box yet';
   if (c.bcLo[0] !== PERIODIC || c.bcHi[0] !== PERIODIC || c.bcLo[1] !== PERIODIC || c.bcHi[1] !== PERIODIC) return 'a shearing box is periodic along x (with the shear) and y';
   if (c.ndim === 3 && !s.stratified && (c.bcLo[2] !== PERIODIC || c.bcHi[2] !== PERIODIC)) return 'an unstratified shearing box is periodic along z';
@@ -1218,7 +1221,7 @@ export function hydroSlots(c: SimConfig): Record<string, string> {
     // Forces on bodies (hydro/forces.ts): the passes that write each cell's wall forces.
     ...wallSlots(forcesOn(c)),
     // Moving bodies (hydro/moving.ts): walls that move, on the uniform grid.
-    moving: movingFlags(c.amrLevels > 0 ? [] : (c.problem.moving ?? []), movingFractions(c)),
+    moving: movingFlags(onBlocks(c) ? [] : (c.problem.moving ?? []), movingFractions(c)),
     // Partly filled cells (hydro/cut.ts), on the uniform grid.
     cut: cutSlot(cutOn(c)),
     // A gas stored as its deviation from a reference state (hydro/ref_on.wgsl), or as it is.
@@ -2651,7 +2654,7 @@ export class Sim implements Simulation {
       } else {
         this.mhd = await MhdPasses.create(
           {
-            device: d, cfg: c, n: this.n, nz: this.nz, params: this.params, clock: this.clock, state: this.state, half: this.pred, slots, comp: k,
+            device: d, cfg: c, n: this.n, ny: this.ny, nz: this.nz, params: this.params, clock: this.clock, state: this.state, half: this.pred, slots, comp: k,
             gfield: this.gfield, bh: this.bh, massFlux: this.massFlux, brush: this.brush,
           },
           this.redDt.first,

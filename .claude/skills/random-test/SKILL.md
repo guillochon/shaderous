@@ -37,6 +37,9 @@ npm run random-test -- --coverage 3000 --seed 1000      # no browser: what the s
 - `--shot-all` saves a screenshot of every run's end state (`run-<seed>.png`); `--shot-every K`
   every K-th (default 8). Look at a few: the numbers do not catch a picture that is wrong.
 - `--seeds 5001,5017` reruns given seeds; `--mode compose|preset` forces one way.
+- `--dim 1` (or 2, 3) makes every setup that many dimensions: presets that do not take it are
+  not drawn, and features that would change it are dropped. Seeds give other documents with
+  it than without.
 - `--steps 1000` finds slower failures. `--gpu-memory 4` (the default) keeps runs under about
   4 GB; 3D grids are capped at 256³ on blocks and 128³ uniform.
 - The runner serves the page itself with reloads off, so other edits do not kill a batch;

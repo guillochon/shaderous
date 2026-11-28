@@ -90,8 +90,10 @@ export function initialFaces(c: SimConfig, n: number, nz: number, dx: number): F
   const spec = c.problem.mhd!;
   const dlo = domainLo(c);
   const fx = n + 1;
+  // (A 1D run has one row of cells, so two rows of faces, laid out with the same stride.)
+  const fy = faceRows(c, n);
   const fz = nz === 1 ? 1 : nz + 1;
-  const out = new Float32Array(fx * fx * fz * 4);
+  const out = new Float32Array(fx * fy * fz * 4);
   const flat = nz === 1;
   if (spec.faces) {
     const f = spec.faces(n, nz);
@@ -110,9 +112,9 @@ export function initialFaces(c: SimConfig, n: number, nz: number, dx: number): F
     const ay = (i: number, j: number, k: number) => A(lo(i, 0), mid(j, 1), zl(k))[1];
     const az = (i: number, j: number, k: number) => A(lo(i, 0), lo(j, 1), zc(k))[2];
     for (let k = 0; k < fz; k++)
-      for (let j = 0; j < fx; j++)
+      for (let j = 0; j < fy; j++)
         for (let i = 0; i < fx; i++) {
-          const o = 4 * ((k * fx + j) * fx + i);
+          const o = 4 * ((k * fy + j) * fx + i);
           const dzAy = flat ? 0 : ay(i, j, k + 1) - ay(i, j, k);
           const dzAx = flat ? 0 : ax(i, j, k + 1) - ax(i, j, k);
           out[o] = (az(i, j + 1, k) - az(i, j, k) - dzAy) / dx;
@@ -128,25 +130,39 @@ export function initialFaces(c: SimConfig, n: number, nz: number, dx: number): F
     const both = !!spec.potential;
     const F = spec.face(c.params, c.ndim);
     for (let k = 0; k < fz; k++)
-      for (let j = 0; j < fx; j++)
+      for (let j = 0; j < fy; j++)
         for (let i = 0; i < fx; i++) {
-          const o = 4 * ((k * fx + j) * fx + i);
+          const o = 4 * ((k * fy + j) * fx + i);
           const f = [F(0, lo(i, 0), mid(j, 1), zc(k)), F(1, mid(i, 0), lo(j, 1), zc(k)), F(2, mid(i, 0), mid(j, 1), zl(k))];
           for (let a = 0; a < 3; a++) out[o + a] = both ? out[o + a] + f[a] : f[a];
         }
   }
+  // A 1D run's only divergence-free field has the same b_x on every x face: a potential or face
+  // function that varies along x gives it its mean (a random 1D setup of a seed field started
+  // with div B = 0.006). Along a periodic x texel n is never read and is left out of the mean.
+  if (c.ndim === 1) {
+    const faces = c.bcLo[0] === PERIODIC ? n : fx;
+    let sum = 0;
+    for (let i = 0; i < faces; i++) sum += out[4 * i];
+    const mean = sum / faces;
+    for (let j = 0; j < fy; j++) for (let i = 0; i < fx; i++) out[4 * (j * fx + i)] = mean;
+  }
   return out;
 }
+
+/** Rows of face texels along y on a uniform grid of side n: one more than its rows of cells. */
+export const faceRows = (c: { ndim: number }, n: number) => (c.ndim === 1 ? 2 : n + 1);
 
 /** Cell-centered field of cell (i, j, k) from face texels as initialFaces lays them out. */
 export function cellField(c: SimConfig, faces: Float32Array, n: number, nz: number, i: number, j: number, k: number): [number, number, number] {
   const fx = n + 1;
+  const fy = faceRows(c, n);
   const up = (a: number, m: number, len: number) => (m + 1 === len && c.bcLo[a] === PERIODIC ? 0 : m + 1);
-  const at = (a: number, ii: number, jj: number, kk: number) => faces[4 * ((kk * fx + jj) * fx + ii) + a];
+  const at = (a: number, ii: number, jj: number, kk: number) => faces[4 * ((kk * fy + jj) * fx + ii) + a];
   const kz = nz === 1 ? 0 : up(2, k, nz);
   return [
     0.5 * (at(0, i, j, k) + at(0, up(0, i, n), j, k)),
-    0.5 * (at(1, i, j, k) + at(1, i, up(1, j, n), k)),
+    0.5 * (at(1, i, j, k) + at(1, i, up(1, j, fy - 1), k)),
     0.5 * (at(2, i, j, k) + at(2, i, j, kz)),
   ];
 }
@@ -155,6 +171,8 @@ interface MhdDeps {
   device: GPUDevice;
   cfg: SimConfig;
   n: number;
+  /** rows of cells along y: n, or 1 in a 1D run */
+  ny: number;
   nz: number;
   params: GPUBuffer;
   clock: GPUBuffer;
@@ -254,15 +272,15 @@ export class MhdPasses {
 
   static async create(dep: MhdDeps, rates: GPUBuffer): Promise<MhdPasses> {
     const m = new MhdPasses(dep);
-    const { device: d, n, nz } = dep;
+    const { device: d, n, ny, nz } = dep;
     const fz = nz === 1 ? 1 : nz + 1;
-    for (let p = 0; p < 2; p++) m.faces.push(tex3d(d, n + 1, 'rgba32float', `face field ${p}`, fz));
-    for (let p = 0; p < 2; p++) m.comps.push(tex3d(d, n + 1, 'rgba32float', `face compensation ${p}`, fz));
-    m.halfFaces = tex3d(d, n + 1, 'rgba32float', 'half-step face field', fz);
+    for (let p = 0; p < 2; p++) m.faces.push(tex3d(d, n + 1, 'rgba32float', `face field ${p}`, fz, ny + 1));
+    for (let p = 0; p < 2; p++) m.comps.push(tex3d(d, n + 1, 'rgba32float', `face compensation ${p}`, fz, ny + 1));
+    m.halfFaces = tex3d(d, n + 1, 'rgba32float', 'half-step face field', fz, ny + 1);
     const S = slabLayers(n, nz);
-    const flux = (n + 4) * (n + 4) * (nz === 1 ? 1 : S + 4) * 3 * 16;
+    const flux = (n + 4) * (ny + 4) * (nz === 1 ? 1 : S + 4) * 3 * 16;
     for (let a = 0; a < 3; a++) m.flux.push(d.createBuffer({ label: `MHD fluxes ${'xyz'[a]}`, size: flux, usage: GPUBufferUsage.STORAGE }));
-    m.emf = d.createBuffer({ label: 'edge impulses', size: (n + 1) * (n + 1) * (nz === 1 ? 1 : S + 1) * 16, usage: GPUBufferUsage.STORAGE });
+    m.emf = d.createBuffer({ label: 'edge impulses', size: (n + 1) * (ny + 1) * (nz === 1 ? 1 : S + 1) * 16, usage: GPUBufferUsage.STORAGE });
     // A shearing box: the means of the two x planes' faces and edges (mhd/shear.wgsl), two vec4
     // per (side, layer, row).
     if (dep.cfg.problem.shear) m.shearScratch = d.createBuffer({ label: 'shearing box planes', size: 2 * (n + 1) * (nz === 1 ? 1 : S + 1) * 2 * 16, usage: GPUBufferUsage.STORAGE });
@@ -299,7 +317,7 @@ export class MhdPasses {
       computePipeline(d, assemble('mhd/rates.wgsl', slots), 'MHD timestep rates'),
       Reducer.create(
         d,
-        [this.dep.n, this.dep.n, this.dep.nz],
+        [this.dep.n, this.dep.ny, this.dep.nz],
         MAG_OPS,
         'mhd/diagnostics.wgsl',
         slots,
@@ -412,13 +430,13 @@ export class MhdPasses {
    * with the field's.
    */
   encodeFieldBrush(pass: GPUComputePassEncoder, parity: number) {
-    const { n, nz } = this.dep;
+    const { n, ny, nz } = this.dep;
     pass.setPipeline(this.pBrush[0]);
     pass.setBindGroup(0, this.gBrush[parity][0]);
-    this.dispatch(pass, [n + 1, n + 1, nz === 1 ? 1 : nz + 1]);
+    this.dispatch(pass, [n + 1, ny + 1, nz === 1 ? 1 : nz + 1]);
     pass.setPipeline(this.pBrush[1]);
     pass.setBindGroup(0, this.gBrush[parity][1]);
-    this.dispatch(pass, [n, n, nz]);
+    this.dispatch(pass, [n, ny, nz]);
   }
 
   /**
@@ -438,22 +456,22 @@ export class MhdPasses {
    * whole half-step state, which its stencils reach across slabs for.
    */
   encode(pass: GPUComputePassEncoder, parity: number) {
-    const { n, nz } = this.dep;
+    const { n, ny, nz } = this.dep;
     const flat = nz === 1;
     for (let s = 0; s < 2; s++) {
       this.slabs.forEach((sl, i) => {
         const last = sl.z0 + sl.nz >= nz;
         pass.setPipeline(this.pFlux[s]);
         pass.setBindGroup(0, this.gFlux[parity][s][i]);
-        this.dispatch(pass, [n + 4, n + 4, flat ? 1 : sl.nz + 4]);
+        this.dispatch(pass, [n + 4, ny + 4, flat ? 1 : sl.nz + 4]);
         this.encodeShear(pass, parity, s, i, [0, 1], flat ? 1 : sl.nz);
         pass.setPipeline(this.pEmf[s]);
         pass.setBindGroup(0, this.gEmf[parity][s][i]);
-        this.dispatch(pass, [n + 1, n + 1, flat ? 1 : sl.nz + 1]);
+        this.dispatch(pass, [n + 1, ny + 1, flat ? 1 : sl.nz + 1]);
         this.encodeShear(pass, parity, s, i, [2, 3], flat ? 1 : sl.nz + 1);
         pass.setPipeline(this.pUpdate[s]);
         pass.setBindGroup(0, this.gUpdate[parity][s][i]);
-        this.dispatch(pass, [n + 1, n + 1, flat ? 1 : sl.nz + (last ? 1 : 0)]);
+        this.dispatch(pass, [n + 1, ny + 1, flat ? 1 : sl.nz + (last ? 1 : 0)]);
         if (s === 1) {
           // The first-order flux correction (mhd/fofc.wgsl), in its rounds, which end at once if no
           // cell was flagged.
@@ -485,22 +503,22 @@ export class MhdPasses {
   encodeRates(pass: GPUComputePassEncoder, parity: number) {
     pass.setPipeline(this.pRates);
     pass.setBindGroup(0, this.gRates[parity]);
-    const { n, nz } = this.dep;
-    this.dispatch(pass, [n, n, nz]);
+    const { n, ny, nz } = this.dep;
+    this.dispatch(pass, [n, ny, nz]);
   }
 
   /** Upload a face field (initialFaces' layout) as the state at `parity`, with nothing to compensate. */
   setFaces(faces: Float32Array, parity = 0) {
-    const { n, nz } = this.dep;
+    const { n, ny, nz } = this.dep;
     const fz = nz === 1 ? 1 : nz + 1;
-    writeTexture(this.dep.device, this.faces[parity], n + 1, 4, faces, fz);
-    writeTexture(this.dep.device, this.comps[parity], n + 1, 4, new Float32Array(faces.length), fz);
+    writeTexture(this.dep.device, this.faces[parity], n + 1, 4, faces, fz, ny + 1);
+    writeTexture(this.dep.device, this.comps[parity], n + 1, 4, new Float32Array(faces.length), fz, ny + 1);
   }
 
   /** The face field at `parity`, in initialFaces' layout (slow: tests and snapshots). */
   readFaces(parity: number): Promise<Float32Array> {
-    const { n, nz } = this.dep;
-    return readTexture(this.dep.device, this.faces[parity], n + 1, 4, nz === 1 ? 1 : nz + 1);
+    const { n, ny, nz } = this.dep;
+    return readTexture(this.dep.device, this.faces[parity], n + 1, 4, nz === 1 ? 1 : nz + 1, ny + 1);
   }
 
   /** Magnetic energy and divergence of the state at `parity`. */

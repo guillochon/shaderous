@@ -79,13 +79,22 @@ const BLOCK = 16;
  * same cell size, for half or a quarter of the cost. Where every axis in use is mirrored (an
  * octant, a 2D quadrant) the grid stays a cube of n over [0, box]. One layer along z in 2D, one cell along y and z in 1D.
  */
+/**
+ * The cells a uniform grid holds along a side in its own textures (a 3D texture's side): a 1D or
+ * 2D run past it runs on the block grid with no levels of refinement (onBlocks), the same cells.
+ * (3D grids stop well short of it, at UNIFORM_MAX in ui/app.ts.)
+ */
+export const UNIFORM_TEXTURE = 2048;
+/** The run is on the block grid (AmrSim): adaptive, or a uniform 1D or 2D grid past UNIFORM_TEXTURE. */
+export const onBlocks = (c: { amrLevels?: number; ndim: 1 | 2 | 3; n: number }): boolean => (c.amrLevels ?? 0) > 0 || (c.ndim < 3 && c.n > UNIFORM_TEXTURE);
+
 export function gridDims(c: GridShape): [number, number, number] {
   const axes = [0, 1, 2].slice(0, c.ndim);
   const s = c.symmetry ?? [false, false, false];
   // (Magnetic fields keep the cube for now: their face passes are sized for one. On blocks a
   // halved axis needs an even number of root blocks.)
   const roots = (c.n >> (c.amrLevels ?? 0)) / BLOCK;
-  const blocksOk = !c.amrLevels || (Number.isInteger(roots) && roots % 2 === 0);
+  const blocksOk = !onBlocks(c) || (Number.isInteger(roots) && roots % 2 === 0);
   const rect = !c.problem.mhd && blocksOk && axes.some((a) => !s[a]);
   const d = [0, 1, 2].map((a) => (rect && s[a] && axes.includes(a) ? c.n / 2 : c.n)) as [number, number, number];
   // One layer along z in 2D; one cell along y and z in 1D.

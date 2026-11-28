@@ -24,7 +24,7 @@ import { clipSegment, lockLine, distanceAt, distances, drawProfilePlot, MAX_PROF
 import { radiationOn, syncRadiationEos } from '../radiation/radiation';
 import { cellEquations, importance, rampColor, type Equation } from './terms';
 import { opacity as meanOpacity } from '../opacity/opacity';
-import { type CellProbe, configFor, refusal, unitConstants, withSymmetry, diffusionKey, MAX_MASSES, MAX_OUTLINE_VERTICES, MAX_SOURCES, type BrushOp, starBrush, burnSpec, type Diagnostics, type Outline, Sim, type SimConfig, type Simulation, type SolveStats, pressureNote, rotationOf, type SourceSpec, cosmologyOf, cylindrical } from '../sim';
+import { type CellProbe, configFor, onBlocks, refusal, unitConstants, withSymmetry, diffusionKey, MAX_MASSES, MAX_OUTLINE_VERTICES, MAX_SOURCES, type BrushOp, starBrush, burnSpec, type Diagnostics, type Outline, Sim, type SimConfig, type Simulation, type SolveStats, pressureNote, rotationOf, type SourceSpec, cosmologyOf, cylindrical } from '../sim';
 import { expandSpecies, switchedSetup } from '../burn/watch';
 import { speciesLabel } from '../species/species';
 import { mixMoments, problemCoefficients, speciesNuclides } from '../species/mixture';
@@ -103,10 +103,11 @@ function maxZoom(): number {
 const gridLabel = (n: number, ndim: 1 | 2 | 3) => (ndim === 1 ? `1D, ${n} cells` : `${n}${ndim === 2 ? '²' : '³'}`);
 // Largest uniform grids offered; beyond these the mesh must be adaptive. A phone, or a device
 // that crashed before, offers only the ones within its memory budget (gpu/memory.ts).
-// (A uniform 1D grid past a 3D texture's side runs on blocks with no levels: sim.ts onBlocks.)
-const UNIFORM_MAX = { 1: 262144, 2: 2048, 3: 256 };
+// (A uniform 1D or 2D grid past a 3D texture's side runs on blocks with no levels: domain.ts
+// onBlocks; gridBytes counts its memory by its blocks.)
+const UNIFORM_MAX = { 1: 262144, 2: 16384, 3: 256 };
 function uniformMax(ndim: 1 | 2 | 3): number {
-  const fits = resFor(ndim).filter((n) => n <= UNIFORM_MAX[ndim] && n ** ndim * Sim.cellBytes(ndim) <= memoryBudget());
+  const fits = resFor(ndim).filter((n) => n <= UNIFORM_MAX[ndim] && gridBytes(n, ndim, 0) <= memoryBudget());
   return fits.length ? fits[fits.length - 1] : resFor(ndim)[0];
 }
 
@@ -1902,7 +1903,7 @@ function build(problemId: string, n: number, ndim: 1 | 2 | 3, levels: number, ke
     if (!look?.baked) closeViewing();
     viewNote = look && look.level < look.fileLevel ? `to level ${look.level} of ${look.fileLevel}` : '';
     // From a file: the same preset, started from the saved state instead of its own.
-    if (snap) Object.assign(next, restartFrom(snap, next.problem, levels > 0, n >> levels));
+    if (snap) Object.assign(next, restartFrom(snap, next.problem, onBlocks(next), n >> levels));
     // A new problem brings its own checkpoint interval; the clock starts at the snapshot's time, if any.
     if (cfg?.problem.id !== problem.id) {
       ckpt.every = defaultCheckpointDt(problem);
@@ -5578,7 +5579,7 @@ async function magnetizeStar(star: { n: number; K: number; rhoc: number; center:
     const snap = await capture(old, { program: 'shaderous', build: BUILD, query: linkQuery() });
     if (old !== sim) return;
     const root = cfg.n >> cfg.amrLevels;
-    const from = restartFrom(snap, cfg.problem, cfg.amrLevels > 0, root);
+    const from = restartFrom(snap, cfg.problem, onBlocks(cfg), root);
     // The star's field alone, for the grid's faces; what the run had is added face by face.
     const alone: SimConfig = { ...cfg, problem: { ...cfg.problem, mhd: added } };
     const sum = (a: Float32Array, b: Float32Array) => a.map((v, i) => v + b[i]);

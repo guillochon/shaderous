@@ -36,7 +36,10 @@ export function amrFits(n: number, ndim: 1 | 2 | 3, levels: number): boolean {
  * blocks with as many again to refine into, and its leaf index.
  */
 export function gridBytes(n: number, ndim: 1 | 2 | 3, levels: number): number {
-  return levels > 0 ? 2 * ((n >> levels) / BS) ** ndim * AmrSim.blockBytes(ndim) + leafIndexBytes(n, ndim) : n ** ndim * Sim.cellBytes(ndim);
+  if (levels > 0) return 2 * ((n >> levels) / BS) ** ndim * AmrSim.blockBytes(ndim) + leafIndexBytes(n, ndim);
+  // A uniform grid past a texture's side is blocks with nothing to refine into (onBlocks).
+  if (onBlocks({ n, ndim, amrLevels: 0 })) return (n / BS) ** ndim * AmrSim.blockBytes(ndim) + leafIndexBytes(n, ndim);
+  return n ** ndim * Sim.cellBytes(ndim);
 }
 
 /** The fewest levels of refinement (at least 1) whose root blocks fit, or 0 if none do. */
@@ -53,6 +56,6 @@ export const fieldShaderFor = (cfg: SimConfig) => (onBlocks(cfg) ? AmrSim.fieldS
  *   run can be drawn meanwhile, and is `preparing` (takes no steps) until it has (AmrSim.create).
  */
 export async function createSim(gpu: Gpu, cfg: SimConfig, opts: { deferUpdate?: boolean } = {}): Promise<Simulation> {
-  // (A uniform 1D grid past a 3D texture's side runs on blocks with no levels: onBlocks.)
+  // (A uniform 1D or 2D grid past a 3D texture's side runs on blocks with no levels: onBlocks.)
   return onBlocks(cfg) ? AmrSim.create(gpu, cfg, opts) : Sim.create(gpu, cfg);
 }

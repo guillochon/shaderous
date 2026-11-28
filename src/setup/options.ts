@@ -176,11 +176,14 @@ export const FACTS: Record<string, { label: string; of: (s: SetupSpec) => Value;
   // What a 1D run takes on the uniform grid alone, so far (sim.ts oneDimUnsupported): with an
   // adaptive mesh, or past 2048 cells (which run on blocks: sim.ts onBlocks).
   'oneD.blocksOnly': {
-    label: 'A magnetic field, implicit pressure or the liquid on an adaptive mesh, or past 2048 cells',
+    label: 'A magnetic field (past 1024 cells), implicit pressure or the liquid (past 2048) on an adaptive mesh',
     of: (s) => {
       const ph = s.physics ?? {};
-      const uniformOnly = FACTS.magnetic.of(s) === true || (ph.pressure ?? 'explicit') === 'implicit' || eosKind(s) === 'liquid';
-      return uniformOnly && ((s.domain?.amr ?? 0) > 0 || (s.domain?.n ?? 0) > 2048);
+      const n = s.domain?.n ?? 0;
+      const amr = (s.domain?.amr ?? 0) > 0;
+      // (A uniform field's faces take one texel more than the grid: sim.ts UNIFORM_FIELD_MAX.)
+      if (FACTS.magnetic.of(s) === true && (amr || n > 1024)) return true;
+      return ((ph.pressure ?? 'explicit') === 'implicit' || eosKind(s) === 'liquid') && (amr || n > 2048);
     },
   },
   // A 1D run takes a star or point mass only at a spherical run's center (sim.ts oneDimUnsupported).
@@ -341,7 +344,7 @@ export const OPTIONS: Option[] = [
   { path: 'view.pitch', label: 'Camera elevation', tip: 'Elevation of the volume view’s camera when the setup opens, in radians', page: 'run', control: num(-1.5, 1.5, { step: 0.05 }), apply: 'live', default: 0.45 },
 
   // ---- domain and grid ----
-  { path: 'domain.ndim', label: 'Dimensions', tip: 'One, two or three dimensions. A 2D run is one layer of cells in x and y; a 1D run one row along x (or r, or R), drawn repeated across the axis it does not resolve', page: 'domain', control: pick({ value: 3, label: '3D', excludes: [{ fact: 'domain.geometry', is: ['cylindrical', 'spherical'] }] }, { value: 2, label: '2D', requires: [{ fact: 'domain.supports2d', reason: 'This setup is three-dimensional (its file says it does not make sense in 2D)' }], excludes: [{ fact: 'gravity.selfFlat', reason: 'Not available with self-gravity (but an axisymmetric (R, z) or spherical run has it)' }, { fact: 'parts.starFlat', reason: 'Not available with a star (but an axisymmetric (R, z) run takes one on its axis)' }] }, { value: 1, label: '1D', requires: [{ fact: 'domain.supports1d', reason: 'This setup is not one-dimensional (its file does not say it makes sense in 1D)' }], excludes: [{ fact: 'oneD.blocked', reason: 'Not available in 1D (plans/one-dimensional.md)' }, { fact: 'oneD.blocksOnly', reason: 'In 1D a magnetic field, implicit pressure and the liquid are on the uniform grid only, so far (2048 cells at most)' }, { fact: 'parts.starLine', reason: 'Not available with a star, or with a point mass anywhere but a spherical run’s center' }] }), apply: 'restart', linkKey: 'dim' },
+  { path: 'domain.ndim', label: 'Dimensions', tip: 'One, two or three dimensions. A 2D run is one layer of cells in x and y; a 1D run one row along x (or r, or R), drawn repeated across the axis it does not resolve', page: 'domain', control: pick({ value: 3, label: '3D', excludes: [{ fact: 'domain.geometry', is: ['cylindrical', 'spherical'] }] }, { value: 2, label: '2D', requires: [{ fact: 'domain.supports2d', reason: 'This setup is three-dimensional (its file says it does not make sense in 2D)' }], excludes: [{ fact: 'gravity.selfFlat', reason: 'Not available with self-gravity (but an axisymmetric (R, z) or spherical run has it)' }, { fact: 'parts.starFlat', reason: 'Not available with a star (but an axisymmetric (R, z) run takes one on its axis)' }] }, { value: 1, label: '1D', requires: [{ fact: 'domain.supports1d', reason: 'This setup is not one-dimensional (its file does not say it makes sense in 1D)' }], excludes: [{ fact: 'oneD.blocked', reason: 'Not available in 1D (plans/one-dimensional.md)' }, { fact: 'oneD.blocksOnly', reason: 'In 1D a magnetic field (up to 1024 cells), implicit pressure and the liquid (up to 2048) are on the uniform grid only, so far' }, { fact: 'parts.starLine', reason: 'Not available with a star, or with a point mass anywhere but a spherical run’s center' }] }), apply: 'restart', linkKey: 'dim' },
   { path: 'domain.n', label: 'Resolution', tip: 'Cells across the box; on an adaptive mesh, at its finest level (up to 16384 in 2D, 262144 in 1D)', page: 'domain', control: num(16, 262144, { integer: true, factor: 2 }), apply: 'restart', linkKey: 'n' },
   { path: 'domain.amr', label: 'Refinement', tip: 'Adaptive mesh: levels of refinement below the coarsest grid. 0 puts every cell at the full resolution', page: 'domain', control: num(0, MAX_AMR_LEVELS, { integer: true, step: 1 }), apply: 'restart', linkKey: 'amr' },
   { path: 'domain.box', label: 'Box size', tip: 'Side of the box, in code units: the domain is a cube of this side centered on the origin', page: 'domain', control: num(1e-12, 1e30, { factor: 2, quantity: 'length' }), apply: 'restart', default: 1 },

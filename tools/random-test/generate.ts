@@ -201,6 +201,8 @@ interface Ctx {
   g: Rng;
   /** a preset's document: its ndim may not change to 2 unless it supports 2D */
   preset?: string;
+  /** every document has this many dimensions (a feature that changes it is dropped) */
+  ndim?: 1 | 2 | 3;
 }
 
 const curved = (d: SetupSpec) => ['cylindrical', 'spherical'].includes(d.domain?.geometry ?? 'cartesian');
@@ -210,7 +212,8 @@ const ndimOf = (d: SetupSpec) => (d.domain?.ndim ?? 3) as 1 | 2 | 3;
 function setGrid(doc: SetupSpec, g: Rng, amr?: number) {
   const d = (doc.domain ??= {});
   d.amr = amr ?? g.pick([0, 0, 1, 2]);
-  d.n = ndimOf(doc) === 1 ? g.pick([512, 1024, 2048]) : ndimOf(doc) === 2 ? g.pick([128, 256, 512]) : d.amr ? g.pick([128, 256]) : g.pick([64, 64, 128]);
+  // (1D: past 2048 cells a uniform grid runs on blocks with no levels, sim.ts onBlocks.)
+  d.n = ndimOf(doc) === 1 ? g.pick([512, 1024, 2048, 2048, 8192]) : ndimOf(doc) === 2 ? g.pick([128, 256, 512]) : d.amr ? g.pick([128, 256]) : g.pick([64, 64, 128]);
   clampGrid(doc);
 }
 
@@ -226,7 +229,7 @@ function clampGrid(doc: SetupSpec) {
   if (ndimOf(doc) === 3 && d.amr) d.n = Math.min(d.n ?? 128, 256);
   if (ndimOf(doc) === 2) d.n = (d.amr ?? 0) >= 6 && !doc.physics?.shear ? 16 << d.amr! : Math.min(d.n ?? 256, 1024);
   // 1D: uniform up to 2048 cells (a 3D texture's side); on blocks, at least two root blocks.
-  if (ndimOf(doc) === 1) d.n = d.amr ? Math.max(32 << d.amr, Math.min(d.n ?? 1024, 16384)) : Math.min(d.n ?? 1024, 2048);
+  if (ndimOf(doc) === 1) d.n = d.amr ? Math.max(32 << d.amr, Math.min(d.n ?? 1024, 16384)) : Math.min(d.n ?? 1024, 8192);
 }
 
 /** A place for a body or a shape: on the axis in (R, z) and (r, theta) runs. */
@@ -1133,6 +1136,8 @@ function tryFeature(doc: SetupSpec, f: Feature, ctx: Ctx): { doc: SetupSpec } | 
   // (After the rules: an equation of state set for them takes the planet's material with it.)
   for (const p of trial.parts ?? []) if (p.kind === 'star' && p.type === 'planet') planetMaterials(trial, p);
   if (!repair(trial, { path: f.type === 'option' ? f.path : undefined, part: out.part })) return { why: `the check: ${errorsOf(trial)[0]?.text ?? '(repair gave up)'}`, doc: trial };
+  // (After the repair too: it takes out a dimension the feature rules out.)
+  if (ctx.ndim && ndimOf(trial) !== ctx.ndim) return { why: `it needs other than ${ctx.ndim}D`, doc: trial };
   return hasFeature(trial, f) ? { doc: trial } : { why: 'the repair took it out', doc: trial };
 }
 
@@ -1166,6 +1171,14 @@ export interface Generated {
   closed: boolean;
 }
 
+/** Whether a preset runs in this many dimensions (its file says it makes sense in them). */
+function presetFits(id: string, ndim: 1 | 2 | 3): boolean {
+  const d = presetSpec(id)?.domain ?? {};
+  if (ndim === 1) return !!d.supports1d;
+  if (ndim === 2) return !!d.supports2d || ['cylindrical', 'spherical'].includes(d.geometry ?? 'cartesian');
+  return !['cylindrical', 'spherical'].includes(d.geometry ?? 'cartesian');
+}
+
 function baseDoc(seed: number, g: Rng): SetupSpec {
   const doc: SetupSpec = {
     format: SETUP_FORMAT,
@@ -1197,7 +1210,7 @@ function dress(doc: SetupSpec, ctx: Ctx): SetupSpec {
     const shape = { type: 'sphere' as const, center: centre(trial, g) as never, radius: r3(g.U(0.03, 0.08)) };
     const blast = factsOf(trial)['eos.energy'] && g.rnd() < 0.5;
     trial.parts!.push(blast ? { kind: 'region', id: newId(trial, 'region'), shape, energy: r3(g.L(0.1, 2)), s: 1 } : { kind: 'region', id: newId(trial, 'region'), shape, rho: r3(g.L(3, 30)), v: vec(g, 1, trial) as never, s: 1 });
-    if (repair(trial, {})) return trial;
+    if (repair(trial, {}) && ndimOf(trial) === ndimOf(doc)) return trial;
   }
   return doc;
 }
@@ -1211,7 +1224,7 @@ export function closedBox(doc: SetupSpec): boolean {
 }
 
 /** A random setup document: a deterministic function of the seed (and of the build's option table). */
-export function generate(seed: number, opts: { mode?: 'compose' | 'preset'; features?: number } = {}): Generated {
+export function generate(seed: number, opts: { mode?: 'compose' | 'preset'; features?: number; ndim?: 1 | 2 | 3 } = {}): Generated {
   const g = rng(seed);
   const mode = opts.mode ?? (seed % 2 ? 'compose' : 'preset');
   const all = features();
@@ -1219,22 +1232,32 @@ export function generate(seed: number, opts: { mode?: 'compose' | 'preset'; feat
   let preset: string | undefined;
   let count: number;
   if (mode === 'preset') {
-    preset = g.pick(PRESET_IDS);
+    preset = g.pick(opts.ndim ? PRESET_IDS.filter((id) => presetFits(id, opts.ndim!)) : PRESET_IDS);
     doc = cloneSetup(presetSpec(preset)!);
     delete doc.featured;
     delete doc.id;
     doc.name = `random ${seed} (${preset})`;
     doc.domain ??= {};
     const own = cloneSetup(doc);
-    if (!curved(doc)) doc.domain.ndim = doc.domain.supports2d && g.rnd() < 0.5 ? 2 : 3;
+    if (opts.ndim) doc.domain.ndim = opts.ndim;
+    else if (!curved(doc)) doc.domain.ndim = doc.domain.supports2d && g.rnd() < 0.5 ? 2 : 3;
     setGrid(doc, g);
-    if (errorsOf(doc).length && !repair(doc, {})) doc = own;
+    if (opts.ndim) {
+      // The dimensions are fixed: another grid if the one drawn does not take the preset (a
+      // field's uniform grid is smaller), and at last a small uniform one.
+      for (let i = 0; i < 4 && errorsOf(doc).length; i++) setGrid(doc, g);
+      if (errorsOf(doc).length) Object.assign(doc.domain, { amr: 0, n: opts.ndim === 3 ? 64 : 512 });
+    } else if (errorsOf(doc).length && !repair(doc, {})) doc = own;
     count = g.int(0, 3);
   } else {
     doc = baseDoc(seed, g);
+    if (opts.ndim && ndimOf(doc) !== opts.ndim) {
+      doc.domain!.ndim = opts.ndim;
+      setGrid(doc, g);
+    }
     count = g.int(2, 6);
   }
-  const ctx: Ctx = { g, preset };
+  const ctx: Ctx = { g, preset, ndim: opts.ndim };
   const tried: Generated['tried'] = [];
   for (let i = 0; i < count; i++) {
     const f = g.pick(all);
@@ -1244,6 +1267,7 @@ export function generate(seed: number, opts: { mode?: 'compose' | 'preset'; feat
     if (ok) doc = next.doc;
   }
   if (mode === 'compose') doc = dress(doc, ctx);
+  if (opts.ndim && ndimOf(doc) !== opts.ndim) throw new Error(`random ${seed}: made a ${ndimOf(doc)}D document, not ${opts.ndim}D`);
   return { seed, mode, preset, doc, tried, features: featuresOf(doc), closed: closedBox(doc) };
 }
 

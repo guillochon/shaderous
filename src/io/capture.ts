@@ -85,16 +85,17 @@ export async function capture(sim: Simulation, meta?: Omit<SnapshotMeta, 'masses
   if (sim instanceof Sim && sim.mhd) {
     const f = await sim.mhd.readFaces(sim.cur);
     const n = sim.n;
+    const ny = sim.ny;
     const nz = sim.nz;
     const fx = n + 1;
-    const texel = (i: number, j: number, k: number) => 4 * ((k * fx + j) * fx + i);
+    const texel = (i: number, j: number, k: number) => 4 * ((k * (ny + 1) + j) * fx + i);
     const up = (a: number, m: number, len: number) => (m + 1 === len && cfg.bcLo[a] === 0 ? 0 : m + 1);
-    for (const k of ['Bf1', 'Bf2', 'Bf3', 'Bcc1', 'Bcc2', 'Bcc3']) mag[k] = new Float32Array(n * n * nz);
+    for (const k of ['Bf1', 'Bf2', 'Bf3', 'Bcc1', 'Bcc2', 'Bcc3']) mag[k] = new Float32Array(n * ny * nz);
     for (let k = 0; k < nz; k++)
-      for (let j = 0; j < n; j++)
+      for (let j = 0; j < ny; j++)
         for (let i = 0; i < n; i++) {
-          const o = (k * n + j) * n + i;
-          const hi = [texel(up(0, i, n), j, k), texel(i, up(1, j, n), k), texel(i, j, nz === 1 ? 0 : up(2, k, nz))];
+          const o = (k * ny + j) * n + i;
+          const hi = [texel(up(0, i, n), j, k), texel(i, up(1, j, ny), k), texel(i, j, nz === 1 ? 0 : up(2, k, nz))];
           for (let a = 0; a < 3; a++) {
             const lo = f[texel(i, j, k) + a];
             mag[`Bf${a + 1}`][o] = lo;
@@ -104,10 +105,10 @@ export async function capture(sim: Simulation, meta?: Omit<SnapshotMeta, 'masses
     const upper = [0, 1, 2].map((a) => {
       if (cfg.bcLo[a] === 0 || (a === 2 && nz === 1)) return [];
       const plane: number[] = [];
-      const [l1, l2] = a === 2 ? [n, n] : [n, nz];
+      const [l1, l2] = a === 2 ? [n, ny] : a === 0 ? [ny, nz] : [n, nz];
       for (let q = 0; q < l2; q++)
         for (let p = 0; p < l1; p++) {
-          const t = a === 0 ? texel(n, p, q) : a === 1 ? texel(p, n, q) : texel(p, q, nz);
+          const t = a === 0 ? texel(n, p, q) : a === 1 ? texel(p, ny, q) : texel(p, q, nz);
           plane.push(f[t + a]);
         }
       return plane;
@@ -205,20 +206,22 @@ export function restartFrom(snap: Snapshot, problem: Problem, adaptive: boolean,
     mhd = {
       faces: (n, nz) => {
         if (n !== m.n || nz !== m.nz) throw new Error('a magnetized run restarts only on the grid it was saved on');
+        // (A 1D run's grid has one row: snap.rootSize[1].)
+        const ny = snap.rootSize[1] === 1 ? 1 : n;
         const fx = n + 1;
         const fz = nz === 1 ? 1 : nz + 1;
-        const f = new Float32Array(fx * fx * fz * 4);
-        const texel = (i: number, j: number, k: number) => 4 * ((k * fx + j) * fx + i);
+        const f = new Float32Array(fx * (ny + 1) * fz * 4);
+        const texel = (i: number, j: number, k: number) => 4 * ((k * (ny + 1) + j) * fx + i);
         const B = [d.Bf1!, d.Bf2!, d.Bf3!];
         for (let k = 0; k < nz; k++)
-          for (let j = 0; j < n; j++)
-            for (let i = 0; i < n; i++) for (let a = 0; a < 3; a++) f[texel(i, j, k) + a] = B[a][(k * n + j) * n + i];
+          for (let j = 0; j < ny; j++)
+            for (let i = 0; i < n; i++) for (let a = 0; a < 3; a++) f[texel(i, j, k) + a] = B[a][(k * ny + j) * n + i];
         m.upper.forEach((plane, a) => {
           if (!plane.length) return;
-          const [l1, l2] = a === 2 ? [n, n] : [n, nz];
+          const [l1, l2] = a === 2 ? [n, ny] : a === 0 ? [ny, nz] : [n, nz];
           for (let q = 0; q < l2; q++)
             for (let p = 0; p < l1; p++) {
-              const t = a === 0 ? texel(n, p, q) : a === 1 ? texel(p, n, q) : texel(p, q, nz);
+              const t = a === 0 ? texel(n, p, q) : a === 1 ? texel(p, ny, q) : texel(p, q, nz);
               f[t + a] = plane[q * l1 + p];
             }
         });
