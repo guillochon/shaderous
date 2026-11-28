@@ -793,6 +793,14 @@ export function withSymmetry(cfg: SimConfig, want: readonly boolean[] | undefine
 }
 
 /**
+ * The cells a uniform 1D grid holds in its own textures (a 3D texture's side): a uniform 1D run
+ * past it runs on the block grid with no levels of refinement (onBlocks), the same cells.
+ */
+export const UNIFORM_1D_TEXTURE = 2048;
+/** The run is on the block grid (AmrSim): adaptive, or a uniform 1D grid past UNIFORM_1D_TEXTURE. */
+export const onBlocks = (c: Pick<SimConfig, 'amrLevels' | 'ndim' | 'n'>): boolean => c.amrLevels > 0 || (c.ndim === 1 && c.n > UNIFORM_1D_TEXTURE);
+
+/**
  * A 1D run's self-gravity (plans/one-dimensional.md), the LINE constant of the monopole passes
  * (gravity/sph_monopole.wgsl, amr/sph_monopole.wgsl): 0 a spherical run's monopole, 1 a
  * Cartesian run's slabs (isolated), 2 the same in a periodic box, 3 an axisymmetric run's rings.

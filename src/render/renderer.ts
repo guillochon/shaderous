@@ -254,6 +254,46 @@ export function mirrorShown(cfg: { ndim: 1 | 2 | 3; symmetry?: readonly boolean[
   const rect = cfg.n !== undefined && cfg.problem !== undefined && rectangular(cfg as GridShape);
   return [0, 1, 2].map((a) => (all || rect) && !!s[a]) as [boolean, boolean, boolean];
 }
+/** Bytes of the field passes' View uniform (render/field.wgsl, amr/field.wgsl). */
+const VIEW_BYTES = 80;
+
+/**
+ * A 1D run with more cells than its map has texels (plans/one-dimensional.md): the window of its
+ * grid along x (fractions, as the map's texels take them: r's cell fraction in a curved run) in
+ * view, a little wider, for the map to cover alone, so that zoomed in far enough every cell is a
+ * texel. Null where the map covers the whole box: a run of other dimensions, one that fits, or
+ * a view that sees most of it. `lay` is the slice's layout (camera.wgsl: half the canvas's width
+ * and height and the shift of its middle, in units of the slice's width at zoom 1).
+ */
+export function mapWindow(cfg: SimConfig, v: Pick<ViewState, 'zoom' | 'cx' | 'cy' | 'mirrorImages'>, side: number, lay: { hw: number; hh: number; shift: number }): [number, number] | null {
+  if (cfg.ndim !== 1 || cfg.n <= side) return null;
+  const xa = v.cx + (lay.shift - lay.hw) / v.zoom;
+  const xb = v.cx + (lay.shift + lay.hw) / v.zoom;
+  const ya = v.cy - lay.hh / v.zoom;
+  const yb = v.cy + lay.hh / v.zoom;
+  let lo: number;
+  let hi: number;
+  const f = sphViewParam(cfg);
+  if (f !== 0) {
+    // The half-disk (render/slice.wgsl sph_code): r from the middle of the left edge.
+    if (xb < 0) return null;
+    const rho = (x: number, y: number) => Math.hypot(2 * x, 2 * y - 1);
+    const near = rho(Math.min(Math.max(0, xa), xb), Math.min(Math.max(0.5, ya), yb));
+    const far = Math.max(rho(xa, ya), rho(xa, yb), rho(xb, ya), rho(xb, yb));
+    const g = Math.abs(f);
+    const fx = (r: number) => (f < 0 ? Math.log(Math.max(r, 1e-30) / g) / Math.log(1 / g) : (r - g) / (1 - g));
+    [lo, hi] = [fx(near), fx(far)];
+  } else if (mirrorShown(cfg, v)[0]) {
+    // Folded across the mirror plane at the view's middle (mirrorComputed).
+    const fold = (d: number) => Math.abs(2 * d - 1);
+    [lo, hi] = xa <= 0.5 && xb >= 0.5 ? [0, Math.max(fold(xa), fold(xb))] : [Math.min(fold(xa), fold(xb)), Math.max(fold(xa), fold(xb))];
+  } else [lo, hi] = [xa, xb];
+  const pad = 0.02 * (hi - lo) + 2 / cfg.n;
+  lo = Math.max(0, lo - pad);
+  hi = Math.min(1, hi + pad);
+  return hi - lo > 0.9 || !(hi > lo) ? null : [lo, hi];
+}
+
 /** A fraction of the computed box as a fraction of the view's box (mirrorShown), and back. */
 export const mirrorDisplay = (f: number, shown: boolean): number => (shown ? 0.5 + 0.5 * f : f);
 export const mirrorComputed = (d: number, shown: boolean): number => (shown ? Math.abs(2 * d - 1) : d);
@@ -420,7 +460,7 @@ export class Renderer {
     this.format = navigator.gpu.getPreferredCanvasFormat();
     this.ctx.configure({ device: this.device, format: this.format, alphaMode: 'opaque' });
     this.cam = this.device.createBuffer({ size: 208, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
-    this.viewBuf = this.device.createBuffer({ size: 64, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    this.viewBuf = this.device.createBuffer({ size: VIEW_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.tf = this.device.createTexture({
       size: [256, 1],
       format: 'rgba8unorm',
@@ -801,7 +841,7 @@ export class Renderer {
     new Uint32Array(vb, 16, 4).set([nx, ny, nz, this.map.width]);
     new Float32Array(vb, 32, 4).set([-1e30, 0, 0, projection !== null && nz > 1 ? 1 : 0]);
     new Uint32Array(vb, 48, 4).set([opts.species ?? 0, sim.speciesStride, Math.ceil((sim.cfg.problem.species?.length ?? 0) / 4), axis]);
-    while (pass.views.length <= slot) pass.views.push(d.createBuffer({ label: `profile view ${pass.views.length}`, size: 64, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST }));
+    while (pass.views.length <= slot) pass.views.push(d.createBuffer({ label: `profile view ${pass.views.length}`, size: VIEW_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST }));
     const viewBuf = pass.views[slot];
     d.queue.writeBuffer(viewBuf, 0, vb);
     if (bufs.key !== key) {
@@ -873,6 +913,14 @@ export class Renderer {
    * at a given size, or taken while the page is not laid out, as in a hidden tab).
    */
   fixedSize: [number, number] | null = null;
+
+  /**
+   * The map over the whole box, whatever is in view (drawNative's pictures at a texel a pixel),
+   * not over a 1D run's window (mapWindow).
+   */
+  fullMap = false;
+  /** The window of a 1D run's map last drawn, as fractions of its grid along x, or null for the whole (mapWindow). */
+  mapWin: [number, number] | null = null;
 
   /** Texels a side of the slice's and the projection's map: the grid's finest cells, capped at the largest texture. */
   get mapSide(): number {
@@ -969,7 +1017,7 @@ export class Renderer {
     const d = this.device;
 
     const [nx, ny, nz] = this.dims;
-    const vb = new ArrayBuffer(64);
+    const vb = new ArrayBuffer(VIEW_BYTES);
     // Mass fraction: which species, the texels between groups of four, and how many groups.
     // Slice and projection: the axis (a 2D run shows its plane), the slice's position along it,
     // and the side of their map.
@@ -996,6 +1044,10 @@ export class Renderer {
     const cw = Math.max(1, this.fixedSize ? this.fixedSize[0] : this.canvas.clientWidth);
     const ch = Math.max(1, this.fixedSize ? this.fixedSize[1] : this.canvas.clientHeight);
     const slice = this.slice ?? { span: 0.94 * Math.min(cw, ch), shift: 0 };
+    // A 1D run finer than its map: the map over what is in view, at up to a texel a cell.
+    const win = this.fullMap || v.mode === 'volume' ? null : mapWindow(sim.cfg, v, side, { hw: cw / (2 * slice.span), hh: ch / (2 * slice.span), shift: slice.shift / slice.span });
+    this.mapWin = win;
+    new Float32Array(vb, 64, 4).set(win ? [win[0], win[1], 0, 0] : [0, 0, 0, 0]);
     const cam = new Float32Array([
         // The slice view's layout (see camera.wgsl) in the spare fourth components.
         ...eye, slice.shift / slice.span,
@@ -1004,7 +1056,7 @@ export class Renderer {
         ...fwd, v.surfaceOpacity,
         tan, aspect, v.opacity, samples,
         v.sliceAxis, v.slicePos, nx, nz,
-        v.showBlocks ? 1 : 0, v.zoom, v.cx, v.cy,
+        v.showBlocks && sim.cfg.amrLevels > 0 ? 1 : 0, v.zoom, v.cx, v.cy,
         v.contours ? Math.max(1, Math.round(v.nContours)) : 0, ...contourRange(v.lo, v.hi), v.contours ? this.hoverLevel : 0,
         // The color scale, for the color of each contour's level (as in the View uniform).
         // Without isosurfaces the fog is all there is to see.
@@ -1013,7 +1065,7 @@ export class Renderer {
         // The axes shown with their mirror images (mirrorShown); a spherical run's r_min / r_max,
         // negative if r is logarithmic (the slice draws the (R, z) half-plane, src/spherical.ts).
         ...mir.map((m) => (m ? 1 : 0)), sphViewParam(sim.cfg),
-        v.exact ? 1 : 0, (2 * tan) / Math.max(1, this.canvas.height), 0, 0,
+        v.exact ? 1 : 0, (2 * tan) / Math.max(1, this.canvas.height), win ? win[0] : 0, win ? win[1] : 0,
         // The tool's ball, the contour levels drawn on its surface.
         ...(this.ball && v.contours ? [...this.ball.pos.map((c) => c - 0.5), this.ball.radius] : [0, 0, 0, 0]),
     ]);
@@ -1119,6 +1171,12 @@ export class Renderer {
   async contourAt(a: number, b: number, v: ViewState, pxPerSide: number, tolPx = 5): Promise<{ level: number; value: number } | null> {
     const map = this.map;
     if (!map || !v.contours) return null;
+    // (A 1D run's map over its window: mapWindow.)
+    const mw = this.mapWin;
+    if (mw) {
+      a = (a - mw[0]) / (mw[1] - mw[0]);
+      pxPerSide *= mw[1] - mw[0];
+    }
     const side = map.width;
     const clampi = (i: number) => Math.min(side - 1, Math.max(0, i));
     // (A 1D run's map is one texel tall: every row is its row.)

@@ -28,6 +28,7 @@ struct View {
   nd: vec4<u32>,   // display volume size; slice and projection map size in w
   cut: vec4<f32>,  // volume view: log10 of the minimum density shown, and 1 (0 in the slice view); slice position in z; 1 with isosurfaces on
   sp: vec4<u32>,   // mass fraction: species, texels along z between groups of four, groups; slice or projection axis in w
+  win: vec4<f32>,  // a 1D run's map over a window of the box along x, from x to y (renderer.ts mapWindow); off where y <= x
 }
 @group(0) @binding(1) var<uniform> V: View;
 
@@ -201,17 +202,22 @@ fn plane(ij: vec2<i32>, ab: vec2<i32>, axis: i32) -> Plane {
   let s = cube_scale();
   let finest = f32(i32(P.amr.y << P.amr.z) * BS) * s[axis];
   let side = f32(V.nd.w);
+  // (A 1D run's map may be over a window of the box along x: renderer.ts mapWindow.)
+  let windowed = V.win.y > V.win.x;
+  let w0 = select(0.0, V.win.x, windowed);
+  let ws = select(1.0, V.win.y - V.win.x, windowed);
   var p = vec3<f32>(0.0);
-  p[ab.x] = (f32(ij.x) + 0.5) / side;
+  p[ab.x] = w0 + (f32(ij.x) + 0.5) / side * ws;
   p[ab.y] = (f32(ij.y) + 0.5) / side;
   p[axis] = (clamp(floor(V.cut.z * finest), 0.0, finest - 1.0) + 0.5) / finest;
   p *= s;
   let f = leaf_at(p);
   // Position within the block, in texels of the map.
-  let within = (p * f32(f.nblk) - vec3<f32>(blk_coord(f.slot))) * side / (f32(f.nblk) * s);
+  var within = (p * f32(f.nblk) - vec3<f32>(blk_coord(f.slot))) * side / (f32(f.nblk) * s);
+  within[ab.x] /= ws;
   // (A 1D run's blocks are bounded along x alone: their edges are lines across the repeat.)
   let edge = select(0.0, 1.0, within[ab.x] < 1.0 || (within[ab.y] < 1.0 && !is1d()));
-  return Plane(leaf_value(f), edge, side / f32(f.nblk * BS));
+  return Plane(leaf_value(f), edge, side / f32(f.nblk * BS) / ws);
 }
 
 // Projection: the leaf cells along `axis` through the center of texel `ij` of the map, each

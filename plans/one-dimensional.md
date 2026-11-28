@@ -13,7 +13,11 @@ the cylindrical view is a half-disk like the spherical one, and the 1D chip alon
   along y. Workgroups along the row (64 x 1). Uniform 1D grids go up to 2048 cells, a 3D
   texture's side; finer ones are adaptive, up to 262144 (the leaf index, a row of one entry per
   finest block, folded into rows of 2048: `amr/grid.wgsl idx_texel`). Checked at 65536, 131072 and
-  262144 cells (5, 6 and 7 levels): Sod on the exact plateau with mass exact.
+  262144 cells (5, 6 and 7 levels): Sod on the exact plateau with mass exact. A uniform 1D grid
+  past 2048 cells runs on blocks with no levels of refinement (`sim.ts onBlocks`), up to 262144.
+  Its view is the map over what is in view when the run has more cells than the map has texels
+  (`renderer.ts mapWindow`, the slice shader's `C.o.zw`, the plane pass's `V.win`), so zoomed in
+  far enough every cell is a texel; a 1D view zooms to some 16 cells across (`MAX_ZOOM_1D`).
 - **Blocks** (decision 2, as built second): a 1D block is one row of BS cells and NGH ghosts at
   each end, PADW texels of a row of the atlas (`amr/grid.wgsl blk_origin`; `AmrSim.atlasShape`
   puts `side` slots to a row and `side` PADW rows to a layer). The invocation decoders give

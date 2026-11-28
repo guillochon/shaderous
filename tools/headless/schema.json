@@ -515,7 +515,7 @@
   {
    "key": "zoom",
    "group": "view",
-   "about": "Slice view: magnification (1 fits the box)"
+   "about": "Slice view: magnification (1 fits the box), up to 256 (in 1D, up to cells / 16, at most 16384)"
   },
   {
    "key": "cx",
@@ -745,8 +745,8 @@
    "link": "zoom",
    "type": "number",
    "min": 1,
-   "max": 256,
-   "about": "Slice view: magnification (1 fits the box)"
+   "max": 16384,
+   "about": "Slice view: magnification (1 fits the box), up to 256 (in 1D, up to cells / 16, at most 16384)"
   },
   {
    "key": "cx",

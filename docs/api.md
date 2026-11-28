@@ -208,7 +208,7 @@ by `npm run gen`.
 | `tx` | The view | Volume view: the point the camera orbits, in fractions of the box (0.5: the center) |
 | `ty` | The view | The same, in y |
 | `tz` | The view | The same, in z |
-| `zoom` | The view | Slice view: magnification (1 fits the box) |
+| `zoom` | The view | Slice view: magnification (1 fits the box), up to 256 (in 1D, up to cells / 16, at most 16384) |
 | `cx` | The view | Slice view: the point at the center of the view, in fractions of the box |
 | `cy` | The view | The same, along the other axis of the slice |
 | `blocks` | The view | Outline the blocks of an adaptive mesh |
@@ -749,7 +749,7 @@ carries each under the key in the second column:
 | `tx` | `tx` | Volume view: the point the camera orbits, in fractions of the box (0.5: the center) |
 | `ty` | `ty` | The same, in y |
 | `tz` | `tz` | The same, in z |
-| `zoom` | `zoom` | Slice view: magnification (1 fits the box) |
+| `zoom` | `zoom` | Slice view: magnification (1 fits the box), up to 256 (in 1D, up to cells / 16, at most 16384) |
 | `cx` | `cx` | Slice view: the point at the center of the view, in fractions of the box |
 | `cy` | `cy` | The same, along the other axis of the slice |
 | `showBlocks` | `blocks` | Outline the blocks of an adaptive mesh |

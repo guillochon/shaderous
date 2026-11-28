@@ -14,12 +14,12 @@ import { CUSTOM_ID } from '../presets/custom';
 import { hasProblem, problemOf } from '../presets/lookup';
 import { flatten, OPTIONS, PART_OPTIONS, type Option } from '../setup/options';
 import { defaultView, type ViewState } from '../render/renderer';
-import { MAX_CONTOURS, MAX_DIST, MAX_ZOOM, MIN_DIST, VIEW_MODES, VIEW_OPTIONS, type ViewOption } from '../render/view_options';
+import { MAX_CONTOURS, MAX_DIST, MAX_ZOOM, MAX_ZOOM_1D, MIN_DIST, VIEW_MODES, VIEW_OPTIONS, type ViewOption } from '../render/view_options';
 import { COLORMAPS, defaultOpacity, type OpacityPoint } from '../render/transfer';
 import { SNAPSHOT_FORMAT, type SnapshotMeta } from '../io/snapshot';
 import { decodeProfileLines, encodeProfileLines, MAX_PROFILES, type Vec3 } from './profile';
 
-export { MAX_CONTOURS, MAX_DIST, MAX_ZOOM, MIN_DIST };
+export { MAX_CONTOURS, MAX_DIST, MAX_ZOOM, MAX_ZOOM_1D, MIN_DIST };
 
 /** What a fresh visit shows. */
 export const DEFAULT_SETUP = { problem: 'kelvin-helmholtz', ndim: 2 as 1 | 2 | 3, n: 512, amr: 3 };
@@ -360,7 +360,8 @@ function decodeRenamed(q: URLSearchParams, report?: LinkReport): LinkOverrides {
   }
 
   // The run sets the largest index of a field and of a species; the table sets every other limit.
-  const most: Partial<Record<string, number>> = { field: FIELDS.length - 1, species: (problemOf(problem).species?.length ?? 1) - 1 };
+  // (A 1D run's view zooms further than one of a plane: MAX_ZOOM_1D.)
+  const most: Partial<Record<string, number>> = { field: FIELDS.length - 1, species: (problemOf(problem).species?.length ?? 1) - 1, zoom: out.ndim === 1 ? MAX_ZOOM_1D : MAX_ZOOM };
   for (const o of VIEW_LINKED) {
     if (o.type === 'mode') put(out.view, o.key, pick(o.link, VIEW_MODES));
     else if (o.type === 'boolean') put(out.view, o.key, bool(o.link));

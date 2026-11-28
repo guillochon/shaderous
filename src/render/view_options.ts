@@ -7,6 +7,11 @@ export type ViewMode = (typeof VIEW_MODES)[number];
 
 /** Largest magnification of the slice view. */
 export const MAX_ZOOM = 256;
+/**
+ * Largest magnification of a 1D run's view, whose cells may be 262144 across: down to some 16
+ * cells across the view (app.ts maxZoom), its map over what is in view (renderer.ts mapWindow).
+ */
+export const MAX_ZOOM_1D = 16384;
 /** Volume view: the nearest and farthest the camera comes to the point it orbits, in box lengths. */
 export const MIN_DIST = 0.225;
 export const MAX_DIST = 6;
@@ -51,7 +56,7 @@ export const VIEW_OPTIONS = [
   { key: 'tx', link: 'tx', type: 'number', min: 0, max: 1, doc: 'Volume view: the point the camera orbits, in fractions of the box (0.5: the center)' },
   { key: 'ty', link: 'ty', type: 'number', min: 0, max: 1, doc: 'The same, in y' },
   { key: 'tz', link: 'tz', type: 'number', min: 0, max: 1, doc: 'The same, in z' },
-  { key: 'zoom', link: 'zoom', type: 'number', min: 1, max: MAX_ZOOM, doc: 'Slice view: magnification (1 fits the box)' },
+  { key: 'zoom', link: 'zoom', type: 'number', min: 1, max: MAX_ZOOM_1D, doc: `Slice view: magnification (1 fits the box), up to ${MAX_ZOOM} (in 1D, up to cells / 16, at most ${MAX_ZOOM_1D})` },
   { key: 'cx', link: 'cx', type: 'number', min: 0, max: 1, doc: 'Slice view: the point at the center of the view, in fractions of the box' },
   { key: 'cy', link: 'cy', type: 'number', min: 0, max: 1, doc: 'The same, along the other axis of the slice' },
   { key: 'showBlocks', link: 'blocks', type: 'boolean', doc: 'Outline the blocks of an adaptive mesh' },

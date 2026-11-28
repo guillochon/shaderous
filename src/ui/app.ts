@@ -1,6 +1,6 @@
 // Interactive front end: controls, frame loop with adaptive substepping, diagnostics panel.
 import { BUILD, reportError, setAdapterInfo } from './errors';
-import { decodeLink, DEFAULT_SETUP, encodeLink, snapshotSettings, viewDefaults, MAX_CONTOURS, MAX_DIST, MAX_ZOOM, MIN_DIST, type LinkOverrides, type LinkProfiles } from './link';
+import { decodeLink, DEFAULT_SETUP, encodeLink, snapshotSettings, viewDefaults, MAX_CONTOURS, MAX_DIST, MAX_ZOOM, MAX_ZOOM_1D, MIN_DIST, type LinkOverrides, type LinkProfiles } from './link';
 import { initGpu, type Gpu } from '../gpu/device';
 import { COMPILE_STAGE, INIT_STAGE, compileProgress, endLoadStage, forgetCompileSetup, loadStage, resetCompileCount, setLoadStage, watchLoading } from '../gpu/progress';
 import { allocationSurvived, autoBudget, GB, lastCrash, memoryBudget, setAdapter, setUserBudget, userBudget, forgetCrashes } from '../gpu/memory';
@@ -95,12 +95,16 @@ function oneDChip(c: SimConfig | undefined): { text: string; title: string } | n
   if (g === 'cylindrical') return { text: 'cylindrically symmetric', title: 'A 1D run: only R is simulated. The view repeats each radius around the polar angle, as rings' };
   return { text: 'repeated along y', title: 'A 1D run: only x is simulated. The view repeats the row of cells along y, which is not part of the run' };
 }
+/** The deepest the slice view zooms: a 1D run's down to some 16 cells across (MAX_ZOOM_1D). */
+function maxZoom(): number {
+  return cfg?.ndim === 1 ? Math.min(MAX_ZOOM_1D, Math.max(MAX_ZOOM, cfg.n / 16)) : MAX_ZOOM;
+}
 /** The grid's size as the page writes it: 512², 128³, or 4096 cells in 1D. */
 const gridLabel = (n: number, ndim: 1 | 2 | 3) => (ndim === 1 ? `1D, ${n} cells` : `${n}${ndim === 2 ? '²' : '³'}`);
 // Largest uniform grids offered; beyond these the mesh must be adaptive. A phone, or a device
 // that crashed before, offers only the ones within its memory budget (gpu/memory.ts).
-// (A 1D grid is a row of a 3D texture, whose side WebGPU caps at 2048: past it a 1D grid is adaptive.)
-const UNIFORM_MAX = { 1: 2048, 2: 2048, 3: 256 };
+// (A uniform 1D grid past a 3D texture's side runs on blocks with no levels: sim.ts onBlocks.)
+const UNIFORM_MAX = { 1: 262144, 2: 2048, 3: 256 };
 function uniformMax(ndim: 1 | 2 | 3): number {
   const fits = resFor(ndim).filter((n) => n <= UNIFORM_MAX[ndim] && n ** ndim * Sim.cellBytes(ndim) <= memoryBudget());
   return fits.length ? fits[fits.length - 1] : resFor(ndim)[0];
@@ -3132,7 +3136,7 @@ function bind() {
     const r = canvas.getBoundingClientRect();
     const sx = (clientX - r.left - r.width / 2 + sliceShift()) / sliceSpan();
     const sy = -(clientY - r.top - r.height / 2) / sliceSpan();
-    const z = Math.min(MAX_ZOOM, Math.max(1, view.zoom * factor));
+    const z = Math.min(maxZoom(), Math.max(1, view.zoom * factor));
     view.cx += sx * (1 / view.zoom - 1 / z);
     view.cy += sy * (1 / view.zoom - 1 / z);
     view.zoom = z;
@@ -7022,6 +7026,8 @@ const api = installApi(
       renderer.capture = capture;
       renderer.densityCut = densityCut();
       renderer.slice = { span: side, shift: 0 };
+      // (A texel a pixel of the map over the whole box, not a 1D run's window of it.)
+      renderer.fullMap = true;
       const hover = renderer.hoverLevel;
       renderer.hoverLevel = 0;
       // The canvas grows to the picture's size until draw(null): shown fitted, the pointer waiting.
@@ -7032,6 +7038,7 @@ const api = installApi(
       } finally {
         renderer.hoverLevel = hover;
         renderer.capture = false;
+        renderer.fullMap = false;
       }
       gpu.device.queue.submit([enc.finish()]);
       sim.submitted();

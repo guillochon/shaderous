@@ -5,7 +5,8 @@ import { domainHi, domainLo, gridDims, rectangular } from '../../src/domain';
 import { BlockTree, BT_STRIDE, RG_RESTRICT } from '../../src/amr/tree';
 import { clipSegment, decodeProfileLines, encodeProfileLines, lockLine, type Vec3 } from '../../src/ui/profile';
 import { decodeLink, encodeLink, viewDefaults } from '../../src/ui/link';
-import { configFor, lineGravity, oneDimUnsupported, refusal } from '../../src/sim';
+import { configFor, lineGravity, onBlocks, oneDimUnsupported, refusal } from '../../src/sim';
+import { mapWindow } from '../../src/render/renderer';
 import { problemById } from '../../src/problems';
 import { defaultOpacity } from '../../src/render/transfer';
 import { factsOf, OPTIONS, unavailable } from '../../src/setup/options';
@@ -129,6 +130,42 @@ describe('1D grids up to 262144 cells', () => {
     expect(n.control.type === 'number' && n.control.max).toBe(262144);
     const l = decodeLink(new URLSearchParams('problem=sod-x&dim=1&n=262144&amr=7'));
     expect([l.ndim, l.n, l.amr]).toEqual([1, 262144, 7]);
+  });
+});
+
+describe('uniform 1D grids past a texture\'s side', () => {
+  it('run on blocks with no levels', () => {
+    const c = (n: number, amrLevels = 0) => configFor(problemById('sod-x'), n, { ndim: 1, amrLevels });
+    expect(onBlocks(c(2048))).toBe(false);
+    expect(onBlocks(c(4096))).toBe(true);
+    expect(onBlocks(c(262144))).toBe(true);
+    expect(onBlocks(configFor(problemById('sod-x'), 4096, { ndim: 2 }))).toBe(false);
+  });
+});
+
+describe('a 1D map over what is in view', () => {
+  const lay = { hw: 0.5, hh: 0.5, shift: 0 };
+  const view = (zoom: number, cx: number) => ({ zoom, cx, cy: 0.5, mirrorImages: false });
+  const sod = (n: number) => configFor(problemById('sod-x'), n, { ndim: 1, amrLevels: n > 2048 ? 3 : 0 });
+  it('is the whole box for a run its map holds, or a view that sees most of it', () => {
+    expect(mapWindow(sod(4096), view(64, 0.5), 8192, lay)).toBeNull();
+    expect(mapWindow(sod(262144), view(1, 0.5), 8192, lay)).toBeNull();
+  });
+  it('is what is in view, a little wider, zoomed in', () => {
+    const w = mapWindow(sod(262144), view(100, 0.3), 8192, lay)!;
+    expect(w[0]).toBeLessThan(0.3 - 0.005);
+    expect(w[1]).toBeGreaterThan(0.3 + 0.005);
+    expect(w[1] - w[0]).toBeLessThan(0.0105 + 4 / 262144);
+  });
+  it('holds every cell in view at a texel a cell once zoomed in far enough', () => {
+    const w = mapWindow(sod(262144), view(64, 0.5), 8192, lay)!;
+    expect((w[1] - w[0]) * 262144).toBeLessThanOrEqual(8192);
+  });
+  it('is a range of radii in a curved run', () => {
+    const c = configFor(problemById('noh-spherical'), 65536, { ndim: 1 });
+    const w = mapWindow(c, view(300, 0.05), 8192, lay)!;
+    expect(w[0]).toBeGreaterThan(0.08);
+    expect(w[1]).toBeLessThan(0.12);
   });
 });
 

@@ -1,6 +1,6 @@
 // Picks the grid for a configuration: uniform, or block-adaptive when refinement levels are set.
 import type { Gpu } from './gpu/device';
-import { Sim, type SimConfig, type Simulation } from './sim';
+import { onBlocks, Sim, type SimConfig, type Simulation } from './sim';
 import { AmrSim } from './amr/amr_sim';
 import { BS, MAX_AMR_LEVELS } from './amr/tree';
 import { memoryBudget } from './gpu/memory';
@@ -46,12 +46,13 @@ export function minAmrLevels(n: number, ndim: 1 | 2 | 3): number {
 }
 
 /** The shader that displays a configuration's run (Simulation.fieldShader), before it exists. */
-export const fieldShaderFor = (cfg: SimConfig) => (cfg.amrLevels > 0 ? AmrSim.fieldShader : Sim.fieldShader);
+export const fieldShaderFor = (cfg: SimConfig) => (onBlocks(cfg) ? AmrSim.fieldShader : Sim.fieldShader);
 
 /**
  * @param opts.deferUpdate on the adaptive mesh, return before the slowest pass has compiled: the
  *   run can be drawn meanwhile, and is `preparing` (takes no steps) until it has (AmrSim.create).
  */
 export async function createSim(gpu: Gpu, cfg: SimConfig, opts: { deferUpdate?: boolean } = {}): Promise<Simulation> {
-  return cfg.amrLevels > 0 ? AmrSim.create(gpu, cfg, opts) : Sim.create(gpu, cfg);
+  // (A uniform 1D grid past a 3D texture's side runs on blocks with no levels: onBlocks.)
+  return onBlocks(cfg) ? AmrSim.create(gpu, cfg, opts) : Sim.create(gpu, cfg);
 }

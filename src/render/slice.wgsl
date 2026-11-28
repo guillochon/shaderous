@@ -121,6 +121,8 @@ fn fs(in: VOut) -> @location(0) vec4<f32> {
     st = s.xy;
     off = s.z == 0.0;
   }
+  // A 1D run's map over a window of its grid along x (renderer.ts mapWindow): st in that window.
+  if (C.o.w > C.o.z) { st.x = (st.x - C.o.z) / (C.o.w - C.o.z); }
   let line = contour(st);
   if (off) { return vec4<f32>(C.bg.rgb, 1.0); }
   let m = textureLoad(MAP, vec2<i32>(floor(st * vec2<f32>(textureDimensions(MAP)))), 0);
