@@ -25,13 +25,24 @@ fn bt(slot: i32, k: u32) -> i32 {
 fn is2d() -> bool {
   return P.dims.z == 1u;
 }
-// A 1D run (plans/one-dimensional.md): one cell along y as well (P.dims.y). Its blocks are laid
-// out as 2D ones, sixteen like rows each, each block its own neighbor along y (the block table,
-// amr/tree.ts writeRow): every row computes the same bits, and the y fluxes cancel. Each child's
-// slot stands for both octants along y (writeRow), as a 1D block splits along x alone. Positions
-// lie on y = 0, and a spherical run's theta is its one cell on every row.
+// A 1D run (plans/one-dimensional.md): one cell along y as well (P.dims.y). Its blocks are one
+// row of BS cells with NGH ghosts at each end, PADW texels of a row of the atlas (blk_origin),
+// and no pass reaches along y: the invocation decoders give l.y = 0 alone (amr/list.wgsl), the
+// stencils stop at x (n_axes), and atl() keeps any cell on its row. Positions lie on y = 0, and
+// a spherical run's theta is its one cell.
 fn is1d() -> bool {
   return P.dims.y == 1u;
+}
+// The axes the stencils reach along: 3, 2 in 2D, 1 in 1D.
+fn blk_axes() -> i32 {
+  return select(select(3, 2, is2d()), 1, is1d());
+}
+// A parent cell's children along y (2, or 1 in 1D), and the weight of each in its mean.
+fn kids_y() -> i32 {
+  return select(2, 1, is1d());
+}
+fn kids_w() -> f32 {
+  return 1.0 / f32(2 * kids_y() * select(2, 1, is2d()));
 }
 // n, as a loop bound the shader compiler cannot see through (P.dims.x is never 0): it then keeps
 // the loop a loop. A large function called in a loop is compiled into it once; unrolled, or
@@ -121,6 +132,11 @@ fn sph_centroid(pl: i32, pg: vec2<i32>) -> vec2<f32> {
 // Atlas texel of a block's cell (0, 0, 0).
 fn blk_origin(slot: i32) -> vec3<i32> {
   let a = i32(P.amr.x);
+  if (is1d()) {
+    // Rows of a slots, a PADW rows to a layer, layers stacked along z (AmrSim.atlasShape).
+    let rows = a * PADW;
+    return vec3<i32>((slot % a) * PADW + NGH, (slot / a) % rows, slot / (a * rows));
+  }
   if (is2d()) {
     // Layers of a x a slots, one cell deep, stacked along z.
     return vec3<i32>((slot % a) * PADW + NGH, ((slot / a) % a) * PADW + NGH, slot / (a * a));
@@ -139,6 +155,8 @@ fn bk_texel(slot: i32, l: vec3<i32>) -> vec3<i32> {
 
 // Atlas texel of local cell l of the block whose origin is o. l may be a face ghost.
 fn atl(o: vec3<i32>, l: vec3<i32>) -> vec3<i32> {
+  // (A 1D block is its row: what would lie beside it along y is itself.)
+  if (is1d()) { return vec3<i32>(o.x + l.x, o.y, o.z); }
   if (is2d()) { return vec3<i32>(o.xy + l.xy, o.z); }
   return o + l;
 }

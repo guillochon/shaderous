@@ -15,7 +15,7 @@ import { BS, PAD } from '../amr/tree';
  */
 export function viewBlockBytes(ndim: 1 | 2 | 3, mhd: boolean, speciesGroups: number, composition: boolean): number {
   const texel = 3 * 16 + 8 + (mhd ? 16 : 0) + speciesGroups * 16 + (composition ? 16 : 0);
-  return PAD ** Math.max(ndim, 2) * texel;
+  return PAD ** ndim * texel;
 }
 
 /** Variables of a file that are not species: the primitives, the passive scalar, the field. */
@@ -476,7 +476,7 @@ export function bakeVariables(field: number, species: string | null): string[] {
  * the density at each cell, no ghost cells (rg32float), and the display's atlas the ray-marcher
  * reads in 3D (render/renderer.ts, rgba16float, with ghost cells).
  */
-export const viewBakedBlockBytes = (ndim: 1 | 2 | 3): number => BS ** Math.max(ndim, 2) * 8 + (ndim === 3 ? PAD ** 3 * 8 : 0);
+export const viewBakedBlockBytes = (ndim: 1 | 2 | 3): number => BS ** ndim * 8 + (ndim === 3 ? PAD ** 3 * 8 : 0);
 
 /** GPU bytes per atlas block of a magnetized run's face field (one rgba32float atlas), which field lines trace. */
-export const viewFacesBlockBytes = (ndim: 1 | 2 | 3): number => PAD ** Math.max(ndim, 2) * 16;
+export const viewFacesBlockBytes = (ndim: 1 | 2 | 3): number => PAD ** ndim * 16;

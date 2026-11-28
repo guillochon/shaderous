@@ -56,9 +56,9 @@ export function surfaceOf(fn: Setup, eos: Eos): (x: number, y: number, z: number
 }
 
 /**
- * Where a 1D run's sixteen like rows of a block take the setup (plans/one-dimensional.md): on the
- * line y = 0, or at a spherical run's equator (code y half the box: theta = pi / 2, as the
- * uniform grid's one theta cell has it), so every row of a block starts the same.
+ * Where a 1D run's blocks take the setup (plans/one-dimensional.md): on the line y = 0, or at a
+ * spherical run's equator (code y half the box: theta = pi / 2, as the uniform grid's one theta
+ * cell has it).
  */
 export const lineY = (c: SimConfig): number => (c.problem.geometry === 'spherical' ? c.problem.box / 2 : 0);
 
@@ -240,7 +240,9 @@ export function leafState(x: FillContext, b: BlockAt): LeafState {
   const three = c.ndim === 3;
   const depth = three ? BS : 1;
   const lo = domainLo(c);
-  const blockCells = BS * BS * depth;
+  // (A 1D block is one row of cells: amr/grid.wgsl blk_origin.)
+  const rows = c.ndim === 1 ? 1 : BS;
+  const blockCells = BS * rows * depth;
   const u1 = new Float32Array(blockCells * 4);
   const u2 = new Float32Array(blockCells * 4);
   const sp = G ? new Float32Array(blockCells * 4 * G) : null;
@@ -252,8 +254,7 @@ export function leafState(x: FillContext, b: BlockAt): LeafState {
   const radT = rad ? new Float32Array(blockCells) : null;
   const radGiven = rad ? new Uint8Array(blockCells) : null;
   const dx = x.dx0 / (1 << b.level);
-  // (A 1D block's sixteen like rows are one row of cells: each counts for a sixteenth.)
-  const vol = c.ndim === 1 ? dx / BS : dx ** c.ndim;
+  const vol = dx ** c.ndim;
   // A magnetic field: the leaf's faces, and their energy in each cell's total.
   const faces = x.mhd ? (blockFaces(c, b as never, x.dx0, x.levels) as Float32Array<ArrayBuffer>) : null;
   const W = BS + 1;
@@ -264,7 +265,7 @@ export function leafState(x: FillContext, b: BlockAt): LeafState {
   const pstat: [number, number, number, number] = [0, 0, Infinity, 0];
   let o = 0;
   for (let k = 0; k < depth; k++)
-    for (let j = 0; j < BS; j++)
+    for (let j = 0; j < rows; j++)
       for (let i = 0; i < BS; i++, o += 4) {
         const w = fn((b.c[0] * BS + i + 0.5) * dx + lo[0], c.ndim === 1 ? lineY(c) : (b.c[1] * BS + j + 0.5) * dx + lo[1], three ? (b.c[2] * BS + k + 0.5) * dx + lo[2] : 0);
         const p = pressureOf(eos, w);

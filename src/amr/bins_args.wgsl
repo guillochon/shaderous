@@ -43,15 +43,19 @@ fn main() {
   let nd = atomicLoad(&CNT[3]);
   LD[0] = nd;
   let flat = P.dims.z == 1u;
+  // A 1D run: blocks of one row, 64 to an interior pass's quad and 96 to a padded one's (amr/list.wgsl).
+  let line = P.dims.y == 1u;
+  let qi = select(4u, 64u, line);
+  let qp = select(4u, 96u, line);
   LA[0] = na;
   LU[0] = nu;
   LL[0] = nl;
   // Padded passes: 3 x 3 x 5 workgroups per block; interior passes: 2 x 2 x 4. In 2D a
   // workgroup covers four blocks (amr/list.wgsl): 3 x 3 or 2 x 2 per four.
   if (flat) {
-    let qa = (na + 3u) / 4u;
-    let qu = (nu + 3u) / 4u;
-    let ql = (nl + 3u) / 4u;
+    let qa = (na + qp - 1u) / qp;
+    let qu = (nu + qi - 1u) / qi;
+    let ql = (nl + qi - 1u) / qi;
     put(0u, min(qa, SLAB_QUADS) * 3u, 3u, (qa + SLAB_QUADS - 1u) / SLAB_QUADS);
     put(1u, min(qu, SLAB_QUADS) * 2u, 2u, (qu + SLAB_QUADS - 1u) / SLAB_QUADS);
     put(2u, min(ql, SLAB_QUADS) * 2u, 2u, (ql + SLAB_QUADS - 1u) / SLAB_QUADS);
@@ -79,9 +83,9 @@ fn main() {
   put(11u, (ma + 7u) / 8u, 1u, ga);
   put(12u, (ma + 7u) / 8u, 1u, ga);
   let w = 18u; // block side (16) plus a ghost layer on each face
-  put(13u, (select(w * w * w, w * w, flat) + 63u) / 64u, min(nl, FLAT_ROWS), (nl + FLAT_ROWS - 1u) / FLAT_ROWS);
+  put(13u, (select(select(w * w * w, w * w, flat), w, line) + 63u) / 64u, min(nl, FLAT_ROWS), (nl + FLAT_ROWS - 1u) / FLAT_ROWS);
   let w2 = 20u; // and two
-  put(14u, (select(w2 * w2 * w2, w2 * w2, flat) + 63u) / 64u, min(na, FLAT_ROWS), (na + FLAT_ROWS - 1u) / FLAT_ROWS);
+  put(14u, (select(select(w2 * w2 * w2, w2 * w2, flat), w2, line) + 63u) / 64u, min(na, FLAT_ROWS), (na + FLAT_ROWS - 1u) / FLAT_ROWS);
   put(15u, 48u, min(na, FLAT_ROWS), (na + FLAT_ROWS - 1u) / FLAT_ROWS);
   let box17 = (select(17u * 17u * 17u, 17u * 17u, flat) + 63u) / 64u;
   put(16u, (select(w2 * w2 * w2, w2 * w2, flat) + 63u) / 64u, min(nl, FLAT_ROWS), (nl + FLAT_ROWS - 1u) / FLAT_ROWS);

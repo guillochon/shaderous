@@ -59,7 +59,8 @@ fn from_coarse(slot: i32, l: vec3<i32>, cs: i32) -> Cons {
   // A coarser block half way through its step is interpolated from its half-step prediction.
   let mid = mid_block(cs);
   var v: array<MaybeCons, 7>;
-  let n = select(7, 5, is2d());
+  // (The center and its neighbors along the axes there are: x and y in 2D, x alone in 1D.)
+  let n = 1 + 2 * blk_axes();
   for (var k = 0; k < n; k++) {
     var at = lc;
     if (k > 0) { at[(k - 1) / 2] += select(-1, 1, (k & 1) == 0); }

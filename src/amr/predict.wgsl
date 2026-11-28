@@ -105,10 +105,17 @@ fn predict_cell(slot: i32, l: vec3<i32>, mask: vec3<f32>, g: vec3<f32>) -> Q {
     zm = load_q(c + vec3<i32>(0, 0, -1));
     zp = load_q(c + vec3<i32>(0, 0, 1));
   }
+  // (A 1D block is its row: nothing beside it along y, whose slope and flux are none.)
+  var ym = q;
+  var yp = q;
+  if (!is1d()) {
+    ym = load_q(c + vec3<i32>(0, -1, 0));
+    yp = load_q(c + vec3<i32>(0, 1, 0));
+  }
   var lo = PhiSteps(vec3<f32>(0.0), vec3<f32>(0.0));
   var hi = lo;
   if (well_balanced()) {
-    let nax = select(3, 2, is2d());
+    let nax = blk_axes();
     for (var axis = 0; axis < nax; axis++) {
       // Not along an axis whose slope is dropped: its neighbors would be edge ghosts.
       if (mask[axis] == 0.0) { continue; }
@@ -131,7 +138,7 @@ fn predict_cell(slot: i32, l: vec3<i32>, mask: vec3<f32>, g: vec3<f32>) -> Q {
     // amr/pressure/lag_fill.wgsl. <ap_lag> reads whichever it is.)
     let p0 = ap_lagp(c);
     g_pgrad = vec3<f32>(0.0);
-    let nax = select(3, 2, is2d());
+    let nax = blk_axes();
     for (var axis = 0; axis < nax; axis++) {
       var e = vec3<i32>(0);
       e[axis] = 1;
@@ -152,7 +159,7 @@ fn predict_cell(slot: i32, l: vec3<i32>, mask: vec3<f32>, g: vec3<f32>) -> Q {
   let pr = predictor(
     q,
     load_q(c + vec3<i32>(-1, 0, 0)), load_q(c + vec3<i32>(1, 0, 0)),
-    load_q(c + vec3<i32>(0, -1, 0)), load_q(c + vec3<i32>(0, 1, 0)),
+    ym, yp,
     zm, zp,
     g, mask, lo, hi,
   );
@@ -161,7 +168,7 @@ fn predict_cell(slot: i32, l: vec3<i32>, mask: vec3<f32>, g: vec3<f32>) -> Q {
     // along the axes whose neighbors exist.
     let k = load_comp(c);
     var w = 0.0;
-    let nax = select(3, 2, is2d());
+    let nax = blk_axes();
     for (var axis = 0; axis < nax; axis++) {
       if (mask[axis] == 0.0) { continue; }
       var e = vec3<i32>(0);
@@ -205,6 +212,7 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_index) 
     gpos = atl(blk_origin(inv.slot), clamp(inv.l, vec3<i32>(0), vec3<i32>(BS - 1)));
   }
   // The point masses' pull at the cell predicted (gravity/ext.wgsl), which the field atlas leaves out.
+  if (is1d()) { mask.y = 0.0; }
   var pr = predict_cell(slot, l, mask, grav_at(gpos) + ext_accel_wb(blk_pos(slot, l), blk_dx(slot)));
   if (at_source) { pr.a = vec4<f32>(pr.a.x, src_velocity(pr.a.yzw, s)); }
   let c = atl(blk_origin(inv.slot), inv.l);

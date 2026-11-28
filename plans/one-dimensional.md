@@ -12,15 +12,26 @@ the cylindrical view is a half-disk like the spherical one, and the 1D chip alon
   run goes through the boundary-mapped pass (`region_pass.ts`), and `grid_n()` has one cell
   along y. Workgroups along the row (64 x 1). Uniform 1D grids go up to 2048 cells, a 3D
   texture's side; finer ones are adaptive, up to 32768 (the leaf index is a row of the same cap).
-- **Blocks: not decision 2 as written.** A 1D block is laid out on the GPU as a 2D one, sixteen
-  like rows, each block its own neighbor along y (the block table's y faces hold its own slot)
-  and each child's slot written for both octants along y (`tree.ts writeRow`, `regridTable`).
-  Every row computes the same bits, so the 2D block shaders run unchanged but for: positions on
-  y = 0 (`blk_pos`), a spherical run's one theta cell on every row (`blk_sph`,
-  `sph_children`, `sph_fine_face`), the leaf index a row (`indexGrid`, `leaf_at`), and one row
-  of each block in the reductions, the readback and the monopole. The tree is truly binary
-  (`nchild` 2, two faces). The cost is sixteen times the cells a block of one row would compute;
-  true `BS x 1` blocks remain a later option (phase 14), and only matter for speed.
+- **Blocks** (decision 2, as built second): a 1D block is one row of BS cells and NGH ghosts at
+  each end, PADW texels of a row of the atlas (`amr/grid.wgsl blk_origin`; `AmrSim.atlasShape`
+  puts `side` slots to a row and `side` PADW rows to a layer). The invocation decoders give
+  l.y = 0 alone and take the rows of a 2D dispatch as more blocks, 16 to an interior pass's
+  workgroups and 24 to a padded one's, so the host dispatches a 16th or a 24th as many
+  (`amr/list.wgsl`, `AmrSim.interior` and `padded`, `amr/bins_args.wgsl`); a flat pass takes a
+  block a workgroup. No stencil reaches along y (`blk_axes`: the predictor, the update and its
+  flux matching, the assembly's interpolation, the flag, the display's gradients), `atl()` keeps
+  any cell on its row, restriction and prolongation take two children (`kids_y`, `kids_w`), and
+  the face-flux tile is off. The tree is binary (`nchild` 2, two faces); its y faces hold the
+  block's own slot and each child stands for both octants along y, as the first version needed,
+  which no lookup now uses.
+  The first version laid each 1D block out as a 2D one of sixteen like rows, each block its own
+  neighbor along y. It ran, at sixteen times the cells, but its rows did not stay alike: the
+  predictor takes a ghost next to a coarser block in place, without the transverse slopes at the
+  rim of the face (they would need an edge ghost), so a block's first and last rows got half-step
+  states unlike the others' at a refinement boundary. Their y fluxes no longer cancelled, and at
+  a strong, slow shock (cylindrical Noh at 4096 cells with 3 levels, t = 0.12) the difference
+  grew into an odd-even oscillation behind it that took a cell's pressure to the floor. With one
+  row there is no y flux to unbalance: that run now reaches t = 0.6 at 15.96 behind the shock.
 - **View** (decisions 4 to 6): the slice map is one texel tall and repeated by the slice shader;
   spherical and 1D axisymmetric runs are the half-disk (`curvedView`; the axisymmetric one with
   no inner radius, `sphViewParam` 1e-30). The chip is over the view (`#oned-chip`) and painted on
@@ -39,11 +50,9 @@ the cylindrical view is a half-disk like the spherical one, and the 1D chip alon
   plateau (p* 0.3031, u* 0.9274); Noh in all three geometries uniform and on blocks (post-shock
   densities 4, 15.9, 63 against 4, 16, 64, pre-shock profiles as (1 + t/r)^(k-1)); the Jeans
   wave's growth to t = 0.5 (amplitude 1.17% against 1.16% from linear theory, uniform and on
-  blocks); a uniform cylinder's gravitational energy, -pi^2 / 4 to five figures; 2D and 3D runs
-  on blocks unchanged. Unit tests: `tests/unit/one_d.test.ts`.
-- **Open**: refined cylindrical Noh at 4096 cells with 3 levels blew up once at t = 0.12 when it
-  was run in many short `run()` calls with diagnostics read in between, and not when run in long
-  calls (twice, identically); not found yet. Presets on in 1D: Sod (x), the Riemann problems,
+  blocks); a uniform cylinder's gravitational energy, -pi^2 / 4 to five figures; refined
+  cylindrical Noh to t = 0.6; 2D and 3D runs on blocks unchanged. Unit tests: `tests/unit/one_d.test.ts`.
+- Presets on in 1D: Sod (x), the Riemann problems,
   strong shock, planar, cylindrical and spherical Noh, advection, Sedov, the spherical blast,
   the uniform collapses, Coggeshall, Jeans and the second collapse. The atmosphere is not: its
   faces along x are periodic, and a 1D atmosphere needs walls there.

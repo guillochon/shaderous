@@ -127,7 +127,7 @@ fn neighbor(c: vec3<i32>) -> vec4<f32> {
 
 fn gradients(c: vec3<i32>, dx: f32) -> Grad {
   var d = array<vec4<f32>, 3>(vec4<f32>(0.0), vec4<f32>(0.0), vec4<f32>(0.0));
-  let axes = select(3, 2, is2d());
+  let axes = blk_axes();
   for (var a = 0; a < axes; a++) {
     var e = vec3<i32>(0);
     e[a] = 1;

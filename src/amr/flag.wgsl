@@ -55,7 +55,7 @@ fn near_mass(slot: i32, l: vec3<i32>) -> bool {
 // A solid cell with a gas cell beside it.
 fn solid_surface(c: vec3<i32>) -> bool {
   var gas = textureLoad(W1, c + vec3<i32>(1, 0, 0), 0).x >= 0.0 || textureLoad(W1, c - vec3<i32>(1, 0, 0), 0).x >= 0.0 ||
-            textureLoad(W1, c + vec3<i32>(0, 1, 0), 0).x >= 0.0 || textureLoad(W1, c - vec3<i32>(0, 1, 0), 0).x >= 0.0;
+            (!is1d() && (textureLoad(W1, c + vec3<i32>(0, 1, 0), 0).x >= 0.0 || textureLoad(W1, c - vec3<i32>(0, 1, 0), 0).x >= 0.0));
   if (!is2d()) {
     gas = gas || textureLoad(W1, c + vec3<i32>(0, 0, 1), 0).x >= 0.0 || textureLoad(W1, c - vec3<i32>(0, 0, 1), 0).x >= 0.0;
   }
@@ -87,7 +87,7 @@ fn lohner(c: vec3<i32>) -> f32 {
   let p0 = textureLoad(W2, c, 0).x;
   var num = vec2<f32>(0.0);
   var den = vec2<f32>(0.0);
-  let axes = select(3, 2, is2d());
+  let axes = blk_axes();
   for (var a = 0; a < axes; a++) {
     var e = vec3<i32>(0);
     e[a] = 1;

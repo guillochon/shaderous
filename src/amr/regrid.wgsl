@@ -61,9 +61,16 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
       zm = cons_from_w(c - vec3<i32>(0, 0, 1));
       zp = cons_from_w(c + vec3<i32>(0, 0, 1));
     }
+    // (A 1D block is its row: nothing beside it along y.)
+    var ym = zm;
+    var yp = zm;
+    if (!is1d()) {
+      ym = cons_from_w(c - ey);
+      yp = cons_from_w(c + ey);
+    }
     if (cylindrical()) { g_cyl_ic = f32(blk_coord(src).x * BS + lc.x) + 0.5; }
     if (spherical()) { g_sph_pro = sph_centroid(bt(src, 0u), (blk_coord(src) * BS + lc).xy); }
-    let s = prolong_slopes(uc, cons_from_w(c - ex), cons_from_w(c + ex), cons_from_w(c - ey), cons_from_w(c + ey), zm, zp);
+    let s = prolong_slopes(uc, cons_from_w(c - ex), cons_from_w(c + ex), ym, yp, zm, zp);
     u = prolong_child(uc, s, l & vec3<i32>(1));
     // The total energy: each child's own kinetic energy and its interpolated internal energy,
     // plus one offset shared by all the children that keeps their mean the coarse cell's.
@@ -79,14 +86,14 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let nz = select(2, 1, is2d());
     var ke = 0.0;
     for (var k = 0; k < nz; k++) {
-      for (var j = 0; j < 2; j++) {
+      for (var j = 0; j < kids_y(); j++) {
         for (var i = 0; i < 2; i++) {
           let ch = prolong_child(uc, s, vec3<i32>(i, j, k));
           ke += child_weight(src, lc, i, j) * 0.5 * dot(ch.a.yzw, ch.a.yzw) / max(ch.a.x, P.rho_floor);
         }
       }
     }
-    ke *= select(0.125, 0.25, is2d());
+    ke *= kids_w();
     u.b.x = 0.5 * dot(u.a.yzw, u.a.yzw) / max(u.a.x, P.rho_floor) + u.b.y + (uc.b.x - uc.b.y - ke);
     let pb = PAINT[2u + u32(inv.slot)];
     if (pb > 0u) {
@@ -111,7 +118,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let nz = select(2, 1, is2d());
     // (An axisymmetric or spherical run: volume-weighted, amr/grid.wgsl child_weight.)
     for (var k = 0; k < nz; k++) {
-      for (var j = 0; j < 2; j++) {
+      for (var j = 0; j < kids_y(); j++) {
         for (var i = 0; i < 2; i++) {
           let c = atl(o, f + vec3<i32>(i, j, k));
           let wr = child_weight(inv.slot, l, i, j);
@@ -120,7 +127,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         }
       }
     }
-    let w = select(0.125, 0.25, is2d());
+    let w = kids_w();
     u = Cons(a * w, b * w);
   } else {
     let c = atl(blk_origin(src), l);

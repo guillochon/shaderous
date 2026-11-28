@@ -124,8 +124,11 @@ const MAX_TIME_BINS_SELF_GRAVITY = 4;
 const BIN_ARGS_BYTES = 256;
 const ARG = (i: number) => 12 * i;
 /** Workgroups per block of a flat dispatch (amr/list.wgsl, inv_flat) out to `reach` ghost layers. */
-// (A 1D run's blocks are laid out as 2D ones, sixteen like rows each: plans/one-dimensional.md.)
-const flatGroups = (ndim: number, reach: number) => Math.ceil((BS + 2 * reach) ** Math.max(ndim, 2) / 64);
+// (A 1D run's block is a row: one workgroup takes it and its ghosts, amr/list.wgsl inv_flat.)
+const flatGroups = (ndim: number, reach: number) => Math.ceil((BS + 2 * reach) ** ndim / 64);
+/** Blocks of a 1D run to one of a 2D dispatch's quads: amr/list.wgsl ROWS1_INTERIOR and ROWS1_PADDED, four of them. */
+const QUAD1_INTERIOR = 4 * 16;
+const QUAD1_PADDED = 4 * 24;
 const BIN_TOTALS = 60;
 /** The first line of a (GPU error) message. */
 const firstLine = (s: string) => s.split(/\r?\n/)[0];
@@ -714,7 +717,7 @@ export class AmrSim implements Simulation {
     // on NVIDIA; see tex3d in gpu/device.ts): a 35^3-block atlas's 5.5 GB textures lost the
     // device. Each atlas texture holds PAD^d texels of 16 bytes per block; the species' one
     // stacks its groups along z.
-    if (!rendersTo3d(d)) fit = Math.min(fit, Math.floor(d.limits.maxBufferSize / (PAD ** Math.max(ndim, 2) * 16 * Math.max(1, groups))));
+    if (!rendersTo3d(d)) fit = Math.min(fit, Math.floor(d.limits.maxBufferSize / (PAD ** ndim * 16 * Math.max(1, groups))));
     return { blocks: Math.max(0, fit), groups };
   }
 
@@ -747,6 +750,16 @@ export class AmrSim implements Simulation {
       return { slotsPerSide: side, layers: side, cap: side ** 3 };
     }
     const w = Math.min(want, Math.max(1, fit.blocks));
+    if (ndim === 1) {
+      // A 1D block is a row of PAD texels (amr/grid.wgsl blk_origin): `side` slots to a row of
+      // the atlas, `side` PAD rows to a layer, as many layers as it takes.
+      const per = (s: number) => s * s * PAD;
+      let side = 1;
+      while (side < limit && per(side) < w) side++;
+      while (side > 1 && per(side) > fit.blocks) side--;
+      const layers = Math.max(1, Math.min(Math.ceil(w / per(side)), Math.floor(fit.blocks / per(side))));
+      return { slotsPerSide: side, layers, cap: per(side) * layers };
+    }
     const layers = Math.ceil(w / limit ** 2);
     const side = Math.min(limit, Math.floor(Math.sqrt(fit.blocks / layers) + 1e-9), Math.ceil(Math.sqrt(w / layers) - 1e-9));
     return { slotsPerSide: side, layers, cap: side ** 2 * layers };
@@ -764,7 +777,7 @@ export class AmrSim implements Simulation {
     // block together.
     // (Burning, which needs species, adds its heating rate: 4 bytes a texel, counted with them.)
     const texel = 9 * 16 + 2 * 4 + (mhd ? MHD_BLOCK_BYTES : 0) + speciesGroups * 4 * 16 + (speciesGroups > 0 ? 4 : 0) + (speciesGroups > 0 && comp ? 16 : 0);
-    return PAD ** Math.max(ndim, 2) * texel + (mhd ? registerBytes(ndim) : 0) + (speciesGroups > 0 ? speciesFaceBytes(ndim) : 0);
+    return PAD ** ndim * texel + (mhd ? registerBytes(ndim) : 0) + (speciesGroups > 0 ? speciesFaceBytes(ndim) : 0);
   }
 
   /**
@@ -782,11 +795,11 @@ export class AmrSim implements Simulation {
     const groups = speciesGroups(cfg.problem);
     // Implicit pressure (amr/pressure.ts): six one-channel atlases, the state the step started
     // from (four channels), and a gas's switches (one).
-    const implicit = implicitPressure(cfg) ? (10 + (cfg.eos === 'liquid' ? 0 : 1)) * 4 * PAD ** Math.max(cfg.ndim, 2) : 0;
+    const implicit = implicitPressure(cfg) ? (10 + (cfg.eos === 'liquid' ? 0 : 1)) * 4 * PAD ** cfg.ndim : 0;
     // Radiation (amr/radiation.ts): its atlases, and the face mass fluxes if the species do not already record them.
     const rad = radiationOn(cfg) ? AmrRad.blockBytes(cfg.ndim) + (groups > 0 ? 0 : speciesFaceBytes(cfg.ndim)) : 0;
     // Forces on bodies (hydro/forces.ts): two four-channel atlases.
-    const walls = forcesOn(cfg) ? 2 * 16 * PAD ** Math.max(cfg.ndim, 2) : 0;
+    const walls = forcesOn(cfg) ? 2 * 16 * PAD ** cfg.ndim : 0;
     return AmrSim.blockBytes(cfg.ndim, cfg.problem.mhd !== undefined, groups, groups > 0 && problemCoefficients(cfg.problem, cfg.eosParams.gamma) !== null) + implicit + rad + walls;
   }
 
@@ -1056,7 +1069,8 @@ export class AmrSim implements Simulation {
     const flat = this.cfg.ndim < 3;
     const bytes = (flat ? 576 : 896) * (this.cfg.viscosity > 0 ? 48 : 32);
     const fits = bytes <= this.device.limits.maxComputeWorkgroupStorageSize;
-    return { TILE: fits ? 1 : 0, TILE_2D: flat ? 1 : 0 };
+    // (A 1D run's blocks are rows, which the tile's boxes of four 2D blocks are not: it gathers.)
+    return { TILE: fits && this.cfg.ndim !== 1 ? 1 : 0, TILE_2D: flat ? 1 : 0 };
   }
 
   /**
@@ -1978,7 +1992,7 @@ export class AmrSim implements Simulation {
     const three = c.ndim === 3;
     const depth = three ? BS : 1;
     const G = this.speciesGroups;
-    const blockCells = BS * BS * depth;
+    const blockCells = BS * this.blockRows * depth;
     const layout = { bytesPerRow: BS * 16, rowsPerImage: BS };
     const leaves = this.tree.leaves();
     // Each leaf's mass, summed in leaf order at the end, so the total is the same whoever made them.
@@ -1991,14 +2005,14 @@ export class AmrSim implements Simulation {
     const write = (i: number, s: LeafState) => {
       const origin = this.origin(leaves[i].slot);
       if (s.faces) this.mhd!.writeFaces(origin, s.faces);
-      d.queue.writeTexture({ texture: this.state[0][0], origin }, s.u1, layout, [BS, BS, depth]);
-      d.queue.writeTexture({ texture: this.state[0][1], origin }, s.u2, layout, [BS, BS, depth]);
-      if (s.km) d.queue.writeTexture({ texture: this.comp!, origin }, s.km, layout, [BS, BS, depth]);
-      if (s.rad && this.rad) d.queue.writeTexture({ texture: this.rad.R[0], origin }, s.rad, layout, [BS, BS, depth]);
+      d.queue.writeTexture({ texture: this.state[0][0], origin }, s.u1, layout, [BS, this.blockRows, depth]);
+      d.queue.writeTexture({ texture: this.state[0][1], origin }, s.u2, layout, [BS, this.blockRows, depth]);
+      if (s.km) d.queue.writeTexture({ texture: this.comp!, origin }, s.km, layout, [BS, this.blockRows, depth]);
+      if (s.rad && this.rad) d.queue.writeTexture({ texture: this.rad.R[0], origin }, s.rad, layout, [BS, this.blockRows, depth]);
       for (let g = 0; g < G; g++) {
         const go = speciesGroupOffset(g, this.speciesDepth);
         const og = [origin[0] + go[0], origin[1] + go[1], origin[2] + go[2]];
-        d.queue.writeTexture({ texture: this.species[0], origin: og }, s.sp!.subarray(g * blockCells * 4, (g + 1) * blockCells * 4), layout, [BS, BS, depth]);
+        d.queue.writeTexture({ texture: this.species[0], origin: og }, s.sp!.subarray(g * blockCells * 4, (g + 1) * blockCells * 4), layout, [BS, this.blockRows, depth]);
       }
       leafMass[i] = s.mass;
       if (s.solids) this.solids = true;
@@ -2157,7 +2171,7 @@ export class AmrSim implements Simulation {
   private async heatSettled(heat: (x: number, y: number, z: number, rho: number) => number | undefined, stale: () => boolean) {
     const leaf = await this.readLeaves();
     if (stale()) return;
-    const per = BS * BS * (this.cfg.ndim === 3 ? BS : 1);
+    const per = BS * this.blockRows * (this.cfg.ndim === 3 ? BS : 1);
     const cells = AmrSim.cellsOf(leaf, this.cfg.problem.geometry === 'cylindrical', this.cfg.symmetry);
     const leaves = this.tree.leaves();
     const touched = new Uint8Array(cells.count);
@@ -2169,7 +2183,7 @@ export class AmrSim implements Simulation {
     const index = new Map(leaves.map((b, i) => [b, i]));
     for (const b of changed) {
       const i = index.get(b)!;
-      d.queue.writeTexture({ texture: this.state[this.cur][1], origin: this.origin(b.slot) }, leaf.u2.subarray(i * per * 4, (i + 1) * per * 4) as Float32Array<ArrayBuffer>, layout, [BS, BS, depth]);
+      d.queue.writeTexture({ texture: this.state[this.cur][1], origin: this.origin(b.slot) }, leaf.u2.subarray(i * per * 4, (i + 1) * per * 4) as Float32Array<ArrayBuffer>, layout, [BS, this.blockRows, depth]);
     }
   }
 
@@ -2196,7 +2210,7 @@ export class AmrSim implements Simulation {
     const settler = new Settler(set, cells);
     // A block's cells: one layer of them in 2D (an axisymmetric run's).
     const depth = this.cfg.ndim === 3 ? BS : 1;
-    const per = BS * BS * depth;
+    const per = BS * this.blockRows * depth;
     // Only the blocks a star may reach are ever rewritten.
     const leaves = tree.leaves().filter((_, i) => settler.owner.subarray(i * per, (i + 1) * per).some((o) => o >= 0));
     const index = new Map(tree.leaves().map((b, i) => [b, i]));
@@ -2204,7 +2218,7 @@ export class AmrSim implements Simulation {
     const upload = (tex: GPUTexture, u: Float32Array) =>
       leaves.forEach((b) => {
         const i = index.get(b)!;
-        d.queue.writeTexture({ texture: tex, origin: this.origin(b.slot) }, u.subarray(i * per * 4, (i + 1) * per * 4) as Float32Array<ArrayBuffer>, layout, [BS, BS, depth]);
+        d.queue.writeTexture({ texture: tex, origin: this.origin(b.slot) }, u.subarray(i * per * 4, (i + 1) * per * 4) as Float32Array<ArrayBuffer>, layout, [BS, this.blockRows, depth]);
       });
     this.settleLog = [];
     for (let round = 0; round < SETTLE_ROUNDS; round++) {
@@ -2239,8 +2253,8 @@ export class AmrSim implements Simulation {
           T[q] = eos.temperature(Math.max(rho[q], c.rhoFloor), u2[o + 1]);
           R[4 * q] = c.radA * T[q] ** 4;
         }
-        diffusionFlux({ ...c, bcLo: [1, 1, 1] }, [BS, BS, depth], this.dx0 / (1 << b.level), R, rho, T, given);
-        d.queue.writeTexture({ texture: this.rad.current, origin: this.origin(b.slot) }, R, layout, [BS, BS, depth]);
+        diffusionFlux({ ...c, bcLo: [1, 1, 1] }, [BS, this.blockRows, depth], this.dx0 / (1 << b.level), R, rho, T, given);
+        d.queue.writeTexture({ texture: this.rad.current, origin: this.origin(b.slot) }, R, layout, [BS, this.blockRows, depth]);
       }
     }
     this.refreshPotential();
@@ -2520,8 +2534,14 @@ export class AmrSim implements Simulation {
   }
 
   /** Atlas texel of a slot's first interior cell. */
+  /** Rows of cells in a block: one in 1D (amr/grid.wgsl blk_origin), else BS. */
+  get blockRows(): number {
+    return this.cfg.ndim === 1 ? 1 : BS;
+  }
   private origin(slot: number): [number, number, number] {
     const a = this.slotsPerSide;
+    // (A 1D block is a row: amr/grid.wgsl blk_origin.)
+    if (this.cfg.ndim === 1) return [(slot % a) * PAD + NG, Math.floor(slot / a) % (a * PAD), Math.floor(slot / (a * a * PAD))];
     if (this.cfg.ndim < 3) return [(slot % a) * PAD + NG, (Math.floor(slot / a) % a) * PAD + NG, Math.floor(slot / (a * a))];
     return [(slot % a) * PAD + NG, (Math.floor(slot / a) % a) * PAD + NG, Math.floor(slot / (a * a)) * PAD + NG];
   }
@@ -2597,7 +2617,7 @@ export class AmrSim implements Simulation {
   // slabs along z, to stay within the workgroups a dispatch may have along an axis.
   private padded(pass: GPUComputePassEncoder, count: number) {
     if (this.cfg.ndim < 3) {
-      const q = Math.ceil(count / 4);
+      const q = Math.ceil(count / (this.cfg.ndim === 1 ? QUAD1_PADDED : 4));
       pass.dispatchWorkgroups(Math.min(q, SLAB_QUADS) * 3, 3, Math.ceil(q / SLAB_QUADS));
     } else pass.dispatchWorkgroups(...padded3d(count));
   }
@@ -2607,7 +2627,7 @@ export class AmrSim implements Simulation {
   }
   private interior(pass: GPUComputePassEncoder, count: number) {
     if (this.cfg.ndim < 3) {
-      const q = Math.ceil(count / 4);
+      const q = Math.ceil(count / (this.cfg.ndim === 1 ? QUAD1_INTERIOR : 4));
       pass.dispatchWorkgroups(Math.min(q, SLAB_QUADS) * 2, 2, Math.ceil(q / SLAB_QUADS));
     } else pass.dispatchWorkgroups(...interior3d(count));
   }
@@ -3917,10 +3937,12 @@ export class AmrSim implements Simulation {
   private async readBoxes(tex: GPUTexture, blocks: Block[], channels: 1 | 4, w = BS, offset: readonly number[] = [0, 0, 0]): Promise<Float32Array> {
     const d = this.device;
     const depth = this.cfg.ndim < 3 ? 1 : w;
+    // (A 1D block is one row: amr/grid.wgsl blk_origin.)
+    const h = this.cfg.ndim === 1 ? 1 : w;
     const rowBytes = w * channels * 4;
     const bytesPerRow = Math.ceil(rowBytes / 256) * 256;
-    const perBlock = bytesPerRow * w * depth;
-    const per = w * w * depth * channels;
+    const perBlock = bytesPerRow * h * depth;
+    const per = w * h * depth * channels;
     const out = new Float32Array(blocks.length * per);
     const chunk = Math.max(1, Math.floor(READ_CHUNK_BYTES / perBlock));
     const rowF = rowBytes / 4;
@@ -3931,7 +3953,7 @@ export class AmrSim implements Simulation {
       const enc = d.createCommandEncoder();
       part.forEach((b, i) => {
         const o = this.origin(b.slot);
-        enc.copyTextureToBuffer({ texture: tex, origin: [o[0] + offset[0], o[1] + offset[1], o[2] + offset[2]] }, { buffer: buf, offset: i * perBlock, bytesPerRow, rowsPerImage: w }, [w, w, depth]);
+        enc.copyTextureToBuffer({ texture: tex, origin: [o[0] + offset[0], o[1] + offset[1], o[2] + offset[2]] }, { buffer: buf, offset: i * perBlock, bytesPerRow, rowsPerImage: h }, [w, h, depth]);
       });
       d.queue.submit([enc.finish()]);
       await buf.mapAsync(GPUMapMode.READ);
@@ -3939,7 +3961,7 @@ export class AmrSim implements Simulation {
       for (let i = 0; i < part.length; i++) {
         const from = (i * perBlock) / 4;
         const to = (start + i) * per;
-        for (let r = 0; r < w * depth; r++) out.set(src.subarray(from + r * padF, from + r * padF + rowF), to + r * rowF);
+        for (let r = 0; r < h * depth; r++) out.set(src.subarray(from + r * padF, from + r * padF + rowF), to + r * rowF);
       }
       buf.unmap();
       buf.destroy();
@@ -3952,18 +3974,12 @@ export class AmrSim implements Simulation {
     this.flush();
     const [a, b] = this.state[this.cur];
     const leaves = this.tree.leaves();
-    let u1 = await this.readBoxes(a, leaves, 4);
-    let u2 = await this.readBoxes(b, leaves, 4);
+    const u1 = await this.readBoxes(a, leaves, 4);
+    const u2 = await this.readBoxes(b, leaves, 4);
     const three = this.cfg.ndim === 3;
     const depth = three ? BS : 1;
-    // A 1D run's block is sixteen like rows: its first is the block (plans/one-dimensional.md).
     const line = this.cfg.ndim === 1;
-    if (line) [u1, u2] = [u1, u2].map((f) => {
-      const out = new Float32Array(leaves.length * BS * 4);
-      for (let i = 0; i < leaves.length; i++) out.set(f.subarray(i * BS * BS * 4, i * BS * BS * 4 + BS * 4), i * BS * 4);
-      return out;
-    });
-    const rows = line ? 1 : BS;
+    const rows = this.blockRows;
     const count = leaves.length * BS * rows * depth;
     const out: LeafCells = {
       x: new Float32Array(count), y: new Float32Array(count), z: new Float32Array(count), dx: new Float32Array(count),
@@ -3993,12 +4009,12 @@ export class AmrSim implements Simulation {
   setLeaves(u1: Float32Array, u2: Float32Array) {
     this.flush();
     const depth = this.cfg.ndim === 3 ? BS : 1;
-    const per = BS * BS * depth * 4;
+    const per = BS * this.blockRows * depth * 4;
     const layout = { bytesPerRow: BS * 16, rowsPerImage: BS };
     this.tree.leaves().forEach((b, i) => {
       const origin = this.origin(b.slot);
-      this.device.queue.writeTexture({ texture: this.state[this.cur][0], origin }, u1.subarray(i * per, (i + 1) * per) as Float32Array<ArrayBuffer>, layout, [BS, BS, depth]);
-      this.device.queue.writeTexture({ texture: this.state[this.cur][1], origin }, u2.subarray(i * per, (i + 1) * per) as Float32Array<ArrayBuffer>, layout, [BS, BS, depth]);
+      this.device.queue.writeTexture({ texture: this.state[this.cur][0], origin }, u1.subarray(i * per, (i + 1) * per) as Float32Array<ArrayBuffer>, layout, [BS, this.blockRows, depth]);
+      this.device.queue.writeTexture({ texture: this.state[this.cur][1], origin }, u2.subarray(i * per, (i + 1) * per) as Float32Array<ArrayBuffer>, layout, [BS, this.blockRows, depth]);
     });
     this.device.queue.writeBuffer(this.clock, 0, clockState(this.cfg));
     this.refreshPotential();
@@ -4024,7 +4040,7 @@ export class AmrSim implements Simulation {
     const raw: Float32Array[] = [];
     for (let g = 0; g < G; g++) raw.push(await this.readBoxes(tex, leaves, 4, BS, speciesGroupOffset(g, this.speciesDepth)));
     const depth = this.cfg.ndim === 3 ? BS : 1;
-    const count = leaves.length * BS * BS * depth;
+    const count = leaves.length * BS * this.blockRows * depth;
     const ns = this.cfg.problem.species!.length;
     const X = Array.from({ length: ns }, () => new Float32Array(count));
     for (let q = 0; q < count; q++) {

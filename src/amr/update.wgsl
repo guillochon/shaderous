@@ -208,7 +208,7 @@ fn match_faces(own: array<Faces, 3>, slot: i32, l: vec3<i32>) -> array<Faces, 3>
   if (!MATCH) { return own; }
   var out = own;
   // Lower and upper face of x, then of y, then of z: entry 6 + k of the block table.
-  let sides = select(6, 4, is2d());
+  let sides = 2 * blk_axes();
   for (var k = 0; k < sides; k++) {
     let axis = k / 2;
     let hi = (k & 1) == 1;
@@ -245,8 +245,8 @@ fn match_faces(own: array<Faces, 3>, slot: i32, l: vec3<i32>) -> array<Faces, 3>
       // The fine cell on the lower side of the face: the last interior cell, or the ghost at -1.
       a0 = 2 * (l - (BS / 2) * h);
       // In 2D the faces are edges: two fine ones per coarse one, both in the plane.
-      n1 = select(2, 1, is2d() && (axis + 1) % 3 == 2);
-      n2 = select(2, 1, is2d() && (axis + 2) % 3 == 2);
+      n1 = select(2, 1, (is2d() && (axis + 1) % 3 == 2) || (is1d() && (axis + 1) % 3 == 1));
+      n2 = select(2, 1, (is2d() && (axis + 2) % 3 == 2) || (is1d() && (axis + 2) % 3 == 1));
       dx = 0.5 * g_dx;
       w = 1.0 / f32(n1 * n2);
       if (BINS_ON) { w *= part; }
@@ -374,7 +374,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(workgroup_id) wi
       if (!is2d()) { oz = tile_faces(b, 2, f, ez); }
     } else {
       ox = axis_fluxes(c, ex, 0, w0, p0);
-      oy = axis_fluxes(c, ey, 1, w0, p0);
+      // (A 1D block is its row: no faces along y.)
+      oy = none;
+      if (!is1d()) { oy = axis_fluxes(c, ey, 1, w0, p0); }
       if (!is2d()) { oz = axis_fluxes(c, ez, 2, w0, p0); }
     }
     // Planes of mirror symmetry: nothing crosses them (hydro/flux.wgsl mirror_flux).
@@ -475,7 +477,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(workgroup_id) wi
     if (self_gravity) {
       let pc = textureLoad(G, c, 0).w;
       dw -= 0.5 * (fx.hi.m * (textureLoad(G, c + ex, 0).w - pc) - fx.lo.m * (textureLoad(G, c - ex, 0).w - pc)
-                 + fy.hi.m * (textureLoad(G, c + ey, 0).w - pc) - fy.lo.m * (textureLoad(G, c - ey, 0).w - pc)
+                 + select(fy.hi.m * (textureLoad(G, c + ey, 0).w - pc) - fy.lo.m * (textureLoad(G, c - ey, 0).w - pc), 0.0, is1d())
                  + fz.hi.m * (textureLoad(G, c + ez, 0).w - pc) - fz.lo.m * (textureLoad(G, c - ez, 0).w - pc));
     }
   }

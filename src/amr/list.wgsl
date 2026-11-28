@@ -21,10 +21,22 @@ const FLAT_ROWS = 32768u;
 
 struct Inv { ok: bool, slot: i32, l: vec3<i32> }
 
+// A 1D run's blocks are one row (amr/grid.wgsl is1d): the rows of a 2D dispatch are blocks
+// too, sixteen to a block's workgroups in an interior pass and 24 in a padded one, so the host
+// dispatches a sixteenth or a 24th as many (AmrSim.interior, padded; amr/bins_args.wgsl).
+const ROWS1_INTERIOR = 16u;
+const ROWS1_PADDED = 24u;
+
 // Interior cells: l in [0, BS).
 fn inv_interior(gid: vec3<u32>) -> Inv {
   var b = gid.x / u32(BS);
   var l = vec3<i32>(i32(gid.x % u32(BS)), i32(gid.y), i32(gid.z));
+  if (is1d()) {
+    b = (4u * (b + (gid.z / 4u) * SLAB_QUADS) + gid.z % 4u) * ROWS1_INTERIOR + gid.y;
+    l = vec3<i32>(l.x, 0, 0);
+    if (b >= LIST[0] || gid.y >= ROWS1_INTERIOR) { return Inv(false, 0, l); }
+    return Inv(true, i32(LIST[1u + b]), l);
+  }
   if (is2d()) {
     b = 4u * (b + (gid.z / 4u) * SLAB_QUADS) + gid.z % 4u;
     l.z = 0;
@@ -49,6 +61,14 @@ fn flat_row(wid: vec3<u32>) -> u32 {
 
 fn inv_flat(wid: vec3<u32>, lix: u32, reach: i32) -> Inv {
   let w = BS + 2 * reach;
+  if (is1d()) {
+    // One workgroup a block: its row and ghosts.
+    let i = i32(wid.x * FLAT_WG + lix);
+    let row = flat_row(wid);
+    let l = vec3<i32>(i - reach, 0, 0);
+    if (row >= LIST[0] || i >= w) { return Inv(false, 0, l); }
+    return Inv(true, i32(LIST[1u + row]), l);
+  }
   let n = select(w * w * w, w * w, is2d());
   let i = i32(wid.x * FLAT_WG + lix);
   let l = vec3<i32>(i % w, (i / w) % w, i / (w * w)) - reach;
@@ -61,6 +81,12 @@ fn inv_flat(wid: vec3<u32>, lix: u32, reach: i32) -> Inv {
 fn inv_padded(gid: vec3<u32>, reach: i32) -> Inv {
   var b = gid.x / 24u;
   var l = vec3<i32>(i32(gid.x % 24u), i32(gid.y), i32(gid.z)) - reach;
+  if (is1d()) {
+    b = (4u * (b + (gid.z / 4u) * SLAB_QUADS) + gid.z % 4u) * ROWS1_PADDED + gid.y;
+    l = vec3<i32>(l.x, 0, 0);
+    if (b >= LIST[0] || gid.y >= ROWS1_PADDED || l.x >= BS + reach) { return Inv(false, 0, l); }
+    return Inv(true, i32(LIST[1u + b]), l);
+  }
   if (is2d()) {
     b = 4u * (b + (gid.z / 4u) * SLAB_QUADS) + gid.z % 4u;
     l.z = 0;

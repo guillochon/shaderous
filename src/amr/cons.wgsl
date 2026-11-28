@@ -38,7 +38,7 @@ fn u_at(slot: i32, l: vec3<i32>) -> Cons {
       }
     }
   }
-  let w = select(0.125, 0.25, is2d());
+  let w = kids_w();
   return Cons(a * w, b * w);
 }
 
