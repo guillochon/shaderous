@@ -1,20 +1,25 @@
 # Plan: one-dimensional runs
 
-Status (2026-11-27): planned, nothing built.
+Status (2026-11-27): planned, nothing built. Open questions of the first draft answered: the
+profile tool is locked to radial lines in spherical and cylindrical 1D runs, the cylindrical
+view is a half-disk like the spherical one, and the 1D chip alone marks the view. Every physics
+module is now in the plan, most as later phases.
 
 A run with `dim: 1`: the gas varies along one axis only. Cartesian runs vary along x; spherical
 runs along r (spherical symmetry); cylindrical runs along R (cylindrical symmetry, no z). Such
 runs support the adaptive mesh, and are drawn in the same view as 2D runs, the one row of cells
 repeated across the axis the run does not resolve: y for a cartesian run, the polar angle for a
 spherical or cylindrical one. The main window says plainly that the run is 1D, so the stripes
-or rings on screen are not mistaken for a 2D flow that happens to be uniform. In a cartesian 1D
-run the profile tool draws horizontal lines only.
+or rings on screen are not mistaken for a 2D flow that happens to be uniform. The profile tool
+draws horizontal lines only in a cartesian 1D run, and radial lines only in a spherical or
+cylindrical one.
 
 Why: the shock tubes, blast waves and collapse problems in `src/presets` (`sod-*`,
 `riemann-*`, `noh-*`, `uniform-collapse-*`, `sedov`, `blast-spherical`, `radiative-shock*`,
-`brio-wu`) are 1D problems run today on 2D grids of n x n cells, n times the work they need. In
-1D a 65536-cell AMR run of a spherical blast costs less than a 256^2 grid, can be checked
-against the exact solutions in `src/reference` directly, and fits on a phone.
+`brio-wu`, `zeldovich-pancake`, `polytrope`, `white-dwarf`) are 1D problems run today on 2D
+grids of n x n cells, n times the work they need. In 1D a 65536-cell AMR run of a spherical
+blast costs less than a 256^2 grid, can be checked against the exact solutions in
+`src/reference` directly, and fits on a phone.
 
 ## What is there to build on
 
@@ -28,20 +33,22 @@ against the exact solutions in `src/reference` directly, and fits on a phone.
   cell spanning [0, pi]: its volume is the whole shell (`sphGrid().shell()`), its theta faces lie
   on the poles where the flux is zero, and the theta source terms of one cell over the whole
   sphere cancel. No new geometry, only a check that one cell gives exactly the shell.
-- **Cylindrical runs are (R, z)** with the axis at R = 0 (`domainLo`). Dropping z leaves R with
-  its geometric terms, which are already there.
+- **Cylindrical runs are (R, z)** with the axis at R = 0 (`domainLo`), and carry the swirl
+  v_phi in the third velocity component with its centrifugal term (`hydro/common.wgsl`).
+  Dropping z leaves R with its geometric terms and the swirl, which are already there.
 - **The slice view reads a 2D map texture** (`render/slice.wgsl` `fs`, `MAP` built by the
   projection pass in `render/project.wgsl` / `render/field.wgsl` / `amr/field.wgsl`). A map one
   texel tall repeats along y on its own, since `floor(st.y * 1) = 0`; and in a spherical run
   `sph_code()` maps the view to (r, theta), so the same one-row map repeats over theta and draws
   concentric half-rings, unchanged.
 - **Block outlines** come through the map's green channel (`m.g`): in 1D they become vertical
-  lines (cartesian) or arcs (spherical) at block edges, which show the refinement well.
+  lines (cartesian) or arcs (spherical, cylindrical) at block edges, which show the refinement.
 - **The profile tool** (`plans/profile-tool.md`, `src/ui/profile.ts`, the profile section of
   `src/ui/app.ts` from `profilePress`) already snaps to 15° steps with Shift (`snapAngle`), and
   is withheld on spherical grids (`noProfile`).
-- **The exact Riemann solver** (`src/reference/riemann_exact.ts`) and the float64 1D references
-  (`src/reference/hydro.ts`, `radiation.ts`) give exact or near-exact answers to compare with.
+- **The exact Riemann solver** (`src/reference/riemann_exact.ts`), the float64 1D references
+  (`src/reference/hydro.ts`, `radiation.ts`) and the exact solutions of `src/validation/exact.ts`
+  give answers to compare with.
 - **Problems say which dimensions they support** (`supports2d` in `src/problems/types.ts`, the
   preset's `domain.supports2d`); `resolveGrid()` in `app.ts` forces 2D for cylindrical and
   spherical problems and 3D where 2D is unsupported.
@@ -64,109 +71,186 @@ against the exact solutions in `src/reference` directly, and fits on a phone.
    takes 2 children. The atlas packs 1D blocks PAD x 1 into rows of the 2D atlas texture
    (`atlasShape` gets a 1D branch: many slots per row, one layer), so the texture formats and
    bindings stay as in 2D. 16-cell blocks are small, but AMR passes dispatch over all blocks at
-   once, so the per-dispatch cost (`dispatch-overhead` memory: ~1.7 us) does not grow with the
-   number of blocks; if block bookkeeping shows up in timings, a later option is BS = 64 in 1D.
+   once, so the per-dispatch cost (~1.7 us) does not grow with the number of blocks; if block
+   bookkeeping shows up in timings, a later option is BS = 64 in 1D.
 3. **The shaders test the degenerate axes at run time, as they do for z today.** Every `flat`
    (`dims.z == 1`) gains a sibling `line` (`dims.y == 1`), and loops over axes stop at
    `select(3, select(2, 1, line), flat)`. No new shader variants: the uniform-grid and block
    shaders read `P.dims`. Workgroup shapes that are 8 x 8 in 2D become 64 x 1 in 1D
    (`dispatch.ts`, `flatGroups`).
-4. **Drawn as 2D, the values repeated across the axis not resolved.** The view is the slice
+4. **Three velocity components, one flux direction ("1.5D").** The state keeps vx, vy, vz; only
+   x faces carry fluxes, and vy and vz are carried along by them. This is what 1D MHD needs
+   (Brio-Wu's v_y and B_y), and what a cylindrical run's swirl needs (v_phi, with its
+   centrifugal term). In a spherical run, whose one theta cell is the whole sphere, v_theta and
+   v_phi must be zero: the setup checker refuses them.
+5. **Drawn as 2D, the values repeated across the axis not resolved.** The view is the slice
    view (the volume view and projection are not offered: `flatView()` is true for 1D). The map
    the projection pass writes is `n_view x 1` texels; the slice shader repeats it.
    - **Cartesian:** the square view as for a 2D run; every column one value. The y axis keeps
      its extent (the box) so zoom, pan, the ruler and the brushes behave as in 2D.
    - **Spherical:** the meridional half-disk the 2D spherical view already draws, each ring
      one value: no change to `slice.wgsl`.
-   - **Cylindrical:** a full disk in the plane perpendicular to the axis (R, phi), each ring one
-     value, R from 0 at the center to the box at the rim. This is a new branch in `fs`, beside
-     `sph_code()`, keyed on a camera flag (`C.mir.w` is taken: a new uniform word), with its CPU
-     twin beside `sphFromView()` / `sphToView()` (`cylFromView()` / `cylToView()`), used by
-     `locate()`, the query readout and the profile tool. (The 2D cylindrical view is the (R, z)
-     half-plane; repeating that along z would look like a cartesian run, which is why the
-     polar angle is the axis repeated.)
-5. **The window says it is 1D in three places,** so the repetition cannot be missed:
-   - a chip in the top-left corner of the view, over the canvas, reading **1D** with what is
-     repeated: "1D · repeated along y", "1D · spherically symmetric", "1D · cylindrically
-     symmetric" (a `title` explaining that only one axis is simulated). It is part of the view,
-     so it is in screenshots and recordings (drawn into the frame, not only an HTML overlay; the
-     profile line's SVG is not in screenshots, see `plans/profile-tool.md`, and the chip must be).
-   - the repeated axis is drawn dimmed, with its tick labels dropped and the label "y (not
-     simulated)" in a cartesian run; in spherical and cylindrical runs there is no y axis to
-     dim, and the chip carries the message.
-   - the query readout leaves out the repeated coordinate ("x = 0.31" alone, or "r = ...") and
-     the HUD's grid line reads `1D, 4096 cells` (or `1D, 256 + 4 levels`) where it now reads
-     `512^2`.
-   The grid menu offers 1D beside 2D and 3D, only for problems that support it.
-6. **The profile tool in a cartesian 1D run draws horizontal lines only.** The second end
-   follows the pointer along x and keeps the first end's y (Shift has nothing to snap); dragging
-   either end of a placed line moves it along x only; a line placed by the link (`prof`), the API
-   (`profile({ line })`) or the runner (`--profile`) has its ends' y set to the first end's.
-   The y it is drawn at is free, since every y gives the same values; the plot is the same.
-   `encodeProfileLines` writes two numbers an end in 1D (x0;x1) and `decodeProfileLines` reads
-   either form. In spherical and cylindrical 1D runs the profile tool keeps the rules the 2D
-   grid has today (withheld on spherical grids, free on cylindrical ones); see open question 1.
-7. **What 1D runs offer at first:** hydrodynamics (every EOS, Riemann solver and limiter),
-   AMR with time bins, cooling, species and burning, point-mass gravity, the spherical monopole
-   (`amr/sph_monopole.wgsl`) for spherical self-gravity, and cartesian self-gravity by direct
-   integration (the field in 1D is `g(x) = -2 pi G (M(<x) - M(>x))`, a prefix sum, cheaper than
-   the multigrid and exact). **Not at first**, each refused by the setup checker with the
-   reason (`src/setup/check.ts`) until built: MHD (1D MHD needs Bx constant and only the face
-   fields of y and z, a stage of its own; `brio-wu` would be its first preset), radiation,
-   moving bodies, meshes and cut cells, driving, particles, mirror symmetry other than x (the
-   only axis there is).
-8. **One setup key.** `dim: 1` in setups, links (`dim=1`, `src/ui/link.ts`), the API
-   (`load({ dim: 1 })`), MCP `load`, the runner (`--dim 1`); presets say `supports1d: true`.
-   Resolutions for 1D: 256 to 65536 uniform (`RES_1D`), and up to `MAX_AMR_LEVELS` above a root
-   grid of at least two blocks. `uniformMax(1)` and `amrFits(n, 1, levels)` follow from bytes
-   per cell, which are the 2D figures with one row.
-9. **Files.** athdf output and input in 1D (Athena++ writes 1D files natively: `nx2 = nx3 = 1`,
-   `src/io`); snapshots and replays carry `ndim: 1`; the runner's slice and probe outputs are
-   one row.
+   - **Cylindrical:** the same half-disk in the left half of the square, R from 0 at the middle
+     of the left edge to the box at the rim, the polar angle around it, each ring one value; so
+     the two curved geometries frame alike. It is the spherical mapping without r_min and with
+     R in place of r: `sph_code()` gains a flag (a new camera uniform word, `C.mir.w` being
+     taken) and `sphFromView()` / `sphToView()` gain the cylindrical case for `locate()`, the
+     query readout and the profile tool. (The 2D cylindrical view is the (R, z) half-plane;
+     repeating that along z would look like a cartesian run, which is why the polar angle is
+     the axis repeated.)
+6. **The window says it is 1D with a chip,** in the top-left corner of the view: **1D** with
+   what is repeated, "1D · repeated along y", "1D · spherically symmetric", "1D · cylindrically
+   symmetric", and a `title` explaining that only one axis is simulated. It is drawn into the
+   frame, not only as an HTML overlay, so it is in screenshots and recordings (the profile
+   line's SVG is not in screenshots, see `plans/profile-tool.md`; the chip must be). Besides the
+   chip, what would say something false about a 1D run follows it: the query readout leaves out
+   the repeated coordinate ("x = 0.31" alone, or "r = ..."), the HUD's grid line reads
+   `1D, 4096 cells` (or `1D, 256 + 4 levels`) where it now reads `512^2`, and the grid menu
+   offers 1D beside 2D and 3D, only for problems that support it.
+7. **The profile tool is locked to the one direction that is not redundant.**
+   - **Cartesian: horizontal lines.** The second end follows the pointer along x and keeps the
+     first end's y (Shift has nothing to snap); dragging either end moves it along x only. The y
+     it is drawn at is free, since every y gives the same values.
+   - **Spherical and cylindrical: radial lines.** The line runs from the center (r = 0, or
+     r_min) outward; a press places the outer end anywhere in the half-disk and the line is
+     drawn from the center to it, along that polar angle; dragging the outer end changes its
+     radius and angle; the inner end is fixed at the center. The plot's x axis is r (or R), not
+     distance along the line, and its samples are taken at r alone, so a spherical 1D run gets
+     the profile tool, which the 2D spherical grid still withholds.
+   - A line placed by the link (`prof`), the API (`profile({ line })`) or the runner
+     (`--profile`) is made to obey the same rule (y set to the first end's; or the inner end
+     moved to the center), with a note that it was. `encodeProfileLines` writes two numbers a
+     line in 1D (the x or r of each end) and `decodeProfileLines` reads either form.
+8. **Every physics module is planned for 1D,** in the phases below. Until its phase is built,
+   the setup checker (`src/setup/check.ts`) refuses a module in a 1D run with the reason and
+   the phase, as it does for options that do not fit a 2D run. A few modules have no meaning in
+   1D and stay refused for good (decision 9).
+9. **Not applicable in 1D, refused for good:** cut cells and meshes (`hydro/cut*.wgsl`,
+   `src/geometry`: a 1D obstacle is an interval, decision 8's phase 12 covers it), disks
+   (`disk`: a disk needs two axes), the shearing box (`shear`), mirror symmetry along y or z,
+   constant gravity along an axis other than x, and point masses off the center (a point mass
+   in 1D is a sheet in a cartesian run and a line in a cylindrical one; phase 5 allows the
+   central mass of a spherical run, the line mass on a cylindrical run's axis, and a sheet at a
+   point of a cartesian run, each with its exact 1D field).
+10. **One setup key.** `dim: 1` in setups, links (`dim=1`, `src/ui/link.ts`), the API
+    (`load({ dim: 1 })`), MCP `load`, the runner (`--dim 1`); presets say `supports1d: true`.
+    Resolutions for 1D: 256 to 65536 uniform (`RES_1D`), and up to `MAX_AMR_LEVELS` above a
+    root grid of at least two blocks. `uniformMax(1)` and `amrFits(n, 1, levels)` follow from
+    bytes per cell, which are the 2D figures with one row.
+11. **Files.** athdf output and input in 1D (Athena++ writes 1D files natively: `nx2 = nx3 = 1`,
+    `src/io`); snapshots and replays carry `ndim: 1`; the runner's slice and probe outputs are
+    one row.
 
-## Stages
+## Phases
 
-1. **Uniform cartesian 1D.** `ndim: 1 | 2 | 3` through the types; `gridDims` gives `[n, 1, 1]`;
-   `line` beside `flat` in the hydro shaders; 1D workgroup shapes; the map one texel tall; the
-   1D chip, the dimmed axis, the HUD and readout; `dim: 1` in the link and API; `supports1d` on
-   `sod-x`, the `riemann-*` presets and `noh-planar`. Done when Sod and LeBlanc at n = 1024
-   match `riemann_exact.ts` to the error the 2D `sod-x` strip has today, and the view and
-   readout show the run as 1D.
-2. **Profile tool lock (cartesian).** Decision 6, with its link, API and runner forms.
-3. **AMR in 1D.** The binary tree (`amr/tree.ts`: children, neighbours, balance, `adapt`,
+Each phase lists its modules, what 1D asks of them, the presets it turns on (`supports1d`) and
+what says it is done.
+
+1. **Uniform cartesian hydrodynamics.** `ndim: 1 | 2 | 3` through the types; `gridDims` gives
+   `[n, 1, 1]`; `line` beside `flat` in the hydro shaders; 1D workgroup shapes; the map one
+   texel tall; the 1D chip, the HUD and readout; `dim: 1` in the link, API, MCP and runner.
+   Modules that act cell by cell come with it: every equation of state (`src/eos`: ideal,
+   liquid, barotropic, degenerate, Helmholtz, H-He, ANEOS, tables, ionizing, gas plus
+   radiation, quartic), every Riemann solver and limiter, floors, fluff, dual energy, the
+   pressure floor, heat sources (`heat`), damping and start damping, reference states and
+   region passes. Presets: `sod-x`, the `riemann-*` presets, `strong-shock`, `noh-planar`,
+   `advection`. Done when Sod and LeBlanc at n = 1024 match `riemann_exact.ts` to the error the
+   2D `sod-x` strip has today, and the view and readout show the run as 1D.
+2. **Profile tool, cartesian.** Decision 7's horizontal lock, with its link, API and runner
+   forms.
+3. **AMR.** The binary tree (`amr/tree.ts`: children, neighbours, balance, `adapt`,
    `replayAdapt`), the 1D atlas (`AmrSim.atlasShape`, `blockBytes`), `assemble`, `flag`,
-   `regrid` (2-child restriction and prolongation), `correct` (flux correction at one face per
-   side), time bins, diagnostics; block outlines in the view. Done when a refined Sod and the
-   `sedov`-style blast agree with the uniform run at the finest resolution, and replay is exact.
-4. **Spherical and cylindrical 1D.** One theta cell over [0, pi] (check `sph_volume` gives the
-   shell to float precision); cylindrical R alone; the cylindrical disk view (decision 4) and its
-   CPU twins; the chip's wording. Presets: `noh-spherical`, `noh-cylindrical`,
-   `uniform-collapse-spherical`, `blast-spherical`, `sedov`. Done when Noh in each geometry
-   matches its exact solution (`src/validation/exact.ts`) and the views show rings.
-5. **Gravity, cooling, species, burning in 1D.** Cartesian prefix-sum gravity; the monopole for
-   spherical runs; `uniform-collapse-planar`, `radiative-shock`, the detonation presets.
-6. **Later, each if wanted:** MHD in 1D (`brio-wu`), radiation in 1D, BS = 64 blocks.
+   `regrid` (2-child restriction and prolongation), `correct` (flux correction at one face a
+   side), time bins, diagnostics and their reductions, refinement criteria (`refineRho`,
+   `refineDense`, `refineZones`, `refineMasses`); block outlines in the view. Done when a
+   refined Sod and a refined blast agree with the uniform run at the finest resolution, mass
+   and energy are conserved to float precision on a periodic box, and replay is exact.
+4. **Spherical and cylindrical geometry.** One theta cell over [0, pi] (check `sph_volume` gives
+   the shell to float precision), uniform and logarithmic r; cylindrical R alone with its swirl;
+   the half-disk views (decision 5) and their CPU twins; the radial profile lock (decision 7);
+   the chip's wording. Presets: `noh-spherical`, `noh-cylindrical`, `blast-spherical`,
+   `sedov`, `uniform-collapse-spherical`, `uniform-collapse-cylindrical`. Done when Noh in each
+   geometry matches its exact solution (`src/validation/exact.ts`) and the views show rings.
+5. **Gravity.** Constant gravity along -x. Self-gravity, which in 1D is a prefix sum rather than
+   a Poisson solve (`src/gravity`, `amr/gravity`): cartesian isolated `g(x) = -2 pi G (M(<x) -
+   M(>x))` per unit area, cartesian periodic the same with the mean density taken out;
+   spherical `g = -G M(<r) / r^2` through the monopole (`amr/sph_monopole.wgsl`);
+   cylindrical `g = -2 G M(<R) / R` per unit length. On blocks the sum runs over leaves in x
+   order, at each leaf's own resolution. The potential (for the view's potential field and the
+   energy diagnostics) by a second prefix sum. Point masses as decision 9 allows them, with
+   sink accretion for the central mass. Hydrostatic settling (`settle`), stars and planets built
+   by setup parts (`src/problems/lane_emden.ts`, `white_dwarf.ts`, `cored_polytrope.ts`,
+   `planet.ts`) evaluated at r. Presets: `jeans`, `uniform-collapse-planar`, `polytrope`,
+   `white-dwarf`, `isothermal-collapse`, `evrard`, `second-collapse`, `atmosphere`. Done when
+   a polytrope holds still to the 2D run's error, and Jeans growth rates match linear theory.
+6. **Species, burning and cooling.** Species advection along x (`hydro/species*.wgsl`,
+   `amr/species*.wgsl`, the mass-flux faces one per side), composition-dependent equations of
+   state, the burn networks and their watch (`src/burn`: aprox13 and the rest), screening,
+   cooling (`src/cooling`: ISM, power law). Presets: `detonation-stable`,
+   `detonation-pulsating`, `detonation-co`, `thermal-instability`, `thermal-instability-hhe`.
+   Done when a stable detonation's
+   speed matches the Chapman-Jouguet speed as the 2D run does, and the pulsating one pulsates
+   with its known period.
+7. **Diffusion and driving.** Viscosity and conduction along x only (`hydro/diffusion*.wgsl`,
+   `diff_rate.wgsl`: the cross terms vanish, the 1D viscous stress is (4/3) mu dv/dx for
+   vx and mu dv/dx for vy, vz); turbulent driving with modes along x (`hydro/drive*.wgsl`,
+   `driveModes(1, ...)`, `drive_ou.wgsl` with the 1D case beside the `flat` one), which in 1D is
+   driven Burgers turbulence. Presets: `driven-turbulence` (1D version), a conduction front
+   test against its similarity solution. Done when a viscous shock's width and a conduction
+   front's profile match their analytic forms.
+8. **Frames and cosmology.** Comoving coordinates (`src/cosmo.ts`) with periodic gravity from
+   phase 5; the accelerating frame (`frame`) along x; the rotating frame in a cylindrical run,
+   about its axis (the swirl carries the frame's rotation; refused in cartesian and spherical
+   runs, where it would need a second axis). Presets: `zeldovich-pancake`, the classic 1D
+   cosmology test. Done when the pancake matches the Zel'dovich solution before shell crossing.
+9. **Magnetic fields.** 1D MHD in the 1.5D form (decision 4): Bx constant in space and time,
+   By and Bz evolved by the x fluxes; constrained transport reduces to this in 1D
+   (docs/numerics.md, the corner EMF section), with the y and z face fields one value a cell;
+   the face registers and their AMR flux correction (`registerBytes(1)`); resistivity. Presets:
+   `brio-wu`, `riemann-slow-shock` and the other MHD Riemann problems, `alfven-wave` along x.
+   Done when Brio-Wu matches the published 1D solution at the resolution of the reference, and
+   Bx stays exactly constant.
+10. **Radiation.** The radiation module along x (`src/radiation`, `amr/rad_*.wgsl`: M1 in 1D,
+    the sweep, the escape and the regrid of its fields) with every opacity (`src/opacity`:
+    constant, electron scattering, Kramers), and the opaque-edge handling of
+    `plans/radiation-opaque-edges.md` where built. `src/reference/radiation.ts` is already a
+    float64 1D version of the scheme, so the GPU 1D run can be compared to it cell by cell.
+    Presets: `radiative-shock`, `radiative-shock-supercritical`, `radiating-sphere`,
+    `sedov-rad`, `sedov-rad-transport`, `radiation-star`. Done when the 1D run agrees with the
+    float64 reference and the radiative shocks match their semi-analytic profiles.
+11. **Implicit pressure and incompressible flow.** The implicit pressure solve
+    (`src/pressure`, `amr/pressure`, `src/reference/psplit.ts`) in 1D, where its multigrid
+    becomes a tridiagonal system (solved directly on the uniform grid; the block multigrid kept
+    for AMR); the liquid equation of state's incompressible limit, in which 1D flow is a uniform
+    velocity set by the boundaries. New presets: a low-Mach acoustic pulse and a 1D liquid
+    piston. Done when the low-Mach run matches the
+    explicit one at Mach 0.3 and stays stable at Mach 0.01.
+12. **Walls, obstacles, moving bodies and inflow.** A 1D obstacle is a solid interval
+    (`solid` cells, `hydro/walls*.wgsl`), a moving body a piston moving along x
+    (`hydro/moving*.wgsl`: the body's distance function is |x - x_b| - half width), forces on it
+    the pressure difference across it (`forceRef`, drag; no lift); moving walls at the
+    boundaries (`wallVelocity`); inflow boundaries as the wind tunnel's (`plans/wind-tunnel.md`)
+    along x. The obstacle, source, sink, temperature and star brushes act on an interval (the
+    brush's circle cut by the line), drawn as a band across the repeated axis. New preset: a piston
+    driving a shock into gas at rest. Done
+    when the piston's shock speed matches the exact solution.
+13. **Particles and debris.** Tracer and debris particles along x (`src/debris`, the census
+    passes, `plans/hybrid-particles.md` if built), placed at their x only and drawn at random y
+    (or polar angle) across the repeated axis so they can be seen. Done when tracers follow the
+    flow of an advected pulse.
+14. **Later, if wanted:** BS = 64 blocks in 1D; special relativity in 1D
+    (`plans/special-relativity.md`) once it is built in 2D, whose shock tubes are 1D problems.
 
 ## Tests
 
 - Unit (vitest, so they run in the Pages deploy's `npm test`): `gridDims`, `domainHi`,
-  `boxFrac` for `ndim: 1`; the binary tree's adapt and balance; `cylFromView` / `cylToView`
-  round trips; `encodeProfileLines` / `decodeProfileLines` in 1D; the horizontal lock on placed
-  and dragged lines; the setup checker's refusals; link round trip of `dim=1`.
-- GPU (Playwright, on a static build: `gpu-tests-static-build` memory): Sod and LeBlanc against
-  the exact solution, uniform and AMR; Noh in three geometries; conservation of mass and energy
-  to float precision on a periodic 1D box with AMR; a screenshot test that the 1D chip and the
-  repeated rows are drawn.
+  `boxFrac` for `ndim: 1`; the binary tree's adapt and balance; the cylindrical half-disk
+  mapping's round trip; `encodeProfileLines` / `decodeProfileLines` in 1D; the horizontal and
+  radial locks on placed and dragged lines; the setup checker's refusals for every module not
+  yet built and for those that do not apply; link round trip of `dim=1`; the 1D prefix-sum
+  gravity against analytic fields.
+- GPU (Playwright, on a static build): for each phase, the test named in its "done when";
+  conservation of mass and energy on a periodic 1D box with AMR; a screenshot test that the 1D
+  chip and the repeated rows (or rings) are drawn.
 - Random setup testing (`random-test` skill): add `dim: 1` to the option table so the fuzzer
-  draws it with the rules of decision 7.
-
-## Open questions
-
-1. In a spherical or cylindrical 1D run, should the profile tool be locked to radial lines from
-   the center (the only line that is not redundant), as the cartesian one is to horizontal
-   lines? A radial line in a spherical 1D run is easy to sample (r alone), so it would also lift
-   the "not on a spherical grid" restriction for 1D.
-2. Cylindrical view: a full disk (decision 4) or a half-disk on the left like the spherical
-   view, so the two geometries frame alike?
-3. Is the chip enough, or should the repeated direction also be shaded (a faint gradient or
-   hatching across y) so a still screenshot without the chip still reads as 1D?
+  draws it with the rules of decisions 8 and 9, widened as each phase lands.
