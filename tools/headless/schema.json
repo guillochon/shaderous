@@ -1226,7 +1226,7 @@
         "boolean",
         "string"
        ],
-       "description": "One pixel per cell of the finest level (the grid's own resolution, up to the largest texture): true or 'box' for the whole box, 'view' for the part in view. A plane only (a 2D run, a slice or a projection); not with width or height"
+       "description": "One pixel per cell of the finest level (the grid's own resolution, up to the largest texture): true or 'box' for the whole box, 'view' for the part in view. A plane only (a 2D run, a slice or a projection); not with width or height. A 1D run's picture is a strip an eighth as tall as it is wide (a spherical or axisymmetric one's half-disk at most 4096 pixels a side)"
       },
       "overlays": {
        "type": "object",
@@ -2051,7 +2051,7 @@
        "boolean",
        "string"
       ],
-      "description": "One pixel per cell of the finest level (the grid's own resolution, up to the largest texture): true or 'box' for the whole box, 'view' for the part in view. A plane only (a 2D run, a slice or a projection); not with width or height"
+      "description": "One pixel per cell of the finest level (the grid's own resolution, up to the largest texture): true or 'box' for the whole box, 'view' for the part in view. A plane only (a 2D run, a slice or a projection); not with width or height. A 1D run's picture is a strip an eighth as tall as it is wide (a spherical or axisymmetric one's half-disk at most 4096 pixels a side)"
      },
      "layout": {
       "type": "string",

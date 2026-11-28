@@ -3385,6 +3385,21 @@ function nativeRegion(region: 'box' | 'view', side: number): { i0: number; i1: n
   return { i0: lo(x0), i1: hi(x1), j0: lo(y0), j1: hi(y1) };
 }
 
+/**
+ * A 1D run's native screenshot (plans/one-dimensional.md): its row of texels repeated along y
+ * holds nothing a square picture's height would add, and at 8192 texels a square would be 8192
+ * pixels tall. A strip an eighth as tall as it is wide (32 pixels at least), about the middle
+ * of the region asked for.
+ */
+function nativeStrip(r: { i0: number; i1: number; j0: number; j1: number }): { i0: number; i1: number; j0: number; j1: number } {
+  const tall = Math.max(32, Math.ceil((r.i1 - r.i0) / 8));
+  if (r.j1 - r.j0 <= tall) return r;
+  const j0 = Math.round((r.j0 + r.j1 - tall) / 2);
+  return { ...r, j0, j1: j0 + tall };
+}
+/** Pixels a side, at most, of a curved 1D run's native screenshot: its half-disk of rings. */
+const NATIVE_RINGS = 4096;
+
 /** A native screenshot has drawn into the canvas and not yet given it back (draw(null)). */
 let nativeShot = false;
 
@@ -7012,8 +7027,10 @@ const api = installApi(
     drawNative(region, capture = false) {
       if (!sim) throw new Error('no run is loaded');
       if (!flatView()) throw new Error('the volume view has no pixel per cell: use slice or projection');
-      const side = renderer.mapSide;
-      const r = nativeRegion(region, side);
+      // A 1D run's picture: its rings drawn on a square of at most NATIVE_RINGS a side in a curved
+      // run (which has no pixel a cell anyway); in a Cartesian one, a strip (nativeStrip).
+      const side = cfg.ndim === 1 && curvedView(cfg) ? Math.min(renderer.mapSide, NATIVE_RINGS) : renderer.mapSide;
+      const r = cfg.ndim === 1 && !curvedView(cfg) ? nativeStrip(nativeRegion(region, side)) : nativeRegion(region, side);
       const w = r.i1 - r.i0;
       const h = r.j1 - r.j0;
       if (!(w >= 1 && h >= 1)) throw new Error('the box is not in view');
