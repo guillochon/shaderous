@@ -36,6 +36,12 @@ export interface OverlayInfo {
   light: boolean;
   /** The status line's text. */
   status?: string;
+  /**
+   * A 1D run (plans/one-dimensional.md): what the view repeats, after a bold "1D" ("repeated
+   * along y", "spherically symmetric"). Painted on every frame, whatever overlays are asked for,
+   * so a picture of a 1D run cannot pass for a 2D one.
+   */
+  oneD?: string;
 }
 
 /** One axis of the triad, in pixels from its origin, y down. */
@@ -208,6 +214,41 @@ export function paintOverlays(g: CanvasRenderingContext2D, w: number, h: number,
     // Kept clear of the color bar's title on the right.
     paintStatus(g, info.status, m, m, w - 2 * m - 0.18 * s, px, ink, edge);
   }
+  if (info.oneD) {
+    const m = Math.round(0.03 * s);
+    paintChip(g, info.oneD, m, m + (opts.status && info.status ? Math.round(1.8 * px) : 0), px);
+  }
+  g.restore();
+}
+
+/** The 1D chip (OverlayInfo.oneD) from (x, y), its top left: a bold "1D" and what the view repeats, on a dark rounded tag. */
+export function paintChip(g: CanvasRenderingContext2D, text: string, x: number, y: number, px: number) {
+  g.save();
+  g.textAlign = 'left';
+  g.textBaseline = 'middle';
+  const bold = `700 ${px}px ${FONT}`;
+  const plain = `${px}px ${FONT}`;
+  g.font = bold;
+  const w1 = g.measureText('1D').width;
+  g.font = plain;
+  const rest = ` · ${text}`;
+  const w2 = g.measureText(rest).width;
+  const pad = 0.55 * px;
+  const h = 1.5 * px;
+  const w = w1 + w2 + 2 * pad;
+  g.beginPath();
+  g.roundRect(x, y, w, h, h / 2);
+  g.fillStyle = 'rgba(12, 28, 52, 0.85)';
+  g.fill();
+  g.lineWidth = Math.max(1, px / 12);
+  g.strokeStyle = '#5d8fd6';
+  g.stroke();
+  g.font = bold;
+  g.fillStyle = '#ffffff';
+  g.fillText('1D', x + pad, y + h / 2);
+  g.font = plain;
+  g.fillStyle = '#cfe2ff';
+  g.fillText(rest, x + pad + w1, y + h / 2);
   g.restore();
 }
 
@@ -355,6 +396,8 @@ export function composeBeside(map: CanvasImageSource, mapW: number, mapH: number
   if (L.bar) paintColorbar(g, L.bar, 'right', L.px, L.s, info, ink, edge);
   if (L.triad) paintTriad(g, L.triad.x, L.triad.y, L.triad.len, L.px, Math.max(2, L.s / 360), info, ink, edge);
   if (L.status && info.status) paintStatus(g, info.status, L.status.x, L.status.y, L.status.maxWidth, L.px, ink, edge);
+  // (On the map itself, in its corner: nothing of the map is hidden that the repeat does not show again.)
+  if (info.oneD) paintChip(g, info.oneD, L.map.x + Math.round(0.6 * L.px), L.map.y + Math.round(0.6 * L.px), L.px);
   g.restore();
   return { canvas, layout: L };
 }

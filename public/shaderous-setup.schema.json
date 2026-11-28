@@ -63,10 +63,11 @@
     "ndim": {
      "enum": [
       3,
-      2
+      2,
+      1
      ],
      "title": "Dimensions",
-     "description": "Two or three dimensions. A 2D run is one layer of cells in x and y"
+     "description": "One, two or three dimensions. A 2D run is one layer of cells in x and y; a 1D run one row along x (or r, or R), drawn repeated across the axis it does not resolve"
     },
     "n": {
      "type": "integer",
@@ -93,6 +94,11 @@
      "type": "boolean",
      "title": "Makes sense in 2D",
      "description": "The setup can also run on a 2D (x, y) grid. Without it the setup is three-dimensional only"
+    },
+    "supports1d": {
+     "type": "boolean",
+     "title": "Makes sense in 1D",
+     "description": "The setup can also run on a 1D grid: along x, or along r or R in a spherical or axisymmetric run"
     },
     "symmetric": {
      "enum": [

@@ -327,7 +327,7 @@ export function openAthdf(lib: Library, name: string): AthdfReader {
     if (grid.some((g) => Math.abs(g[2] - 1) > 1e-6)) throw new Error('only uniformly spaced grids can be read');
 
     const head: Snapshot = {
-      ndim: rootSize[2] === 1 ? 2 : 3,
+      ndim: rootSize[2] !== 1 ? 3 : rootSize[1] !== 1 ? 2 : 1,
       rootSize,
       blockSize,
       lo: grid.map((g) => g[0]),

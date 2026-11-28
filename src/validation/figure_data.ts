@@ -220,7 +220,7 @@ async function timeSteps(sim: Sim | AmrSim, steps: number): Promise<number> {
 interface ThroughputGrid {
   label: string;
   problem: string;
-  ndim: 2 | 3;
+  ndim: 1 | 2 | 3;
   /** [finest cells per side, levels of refinement] */
   runs: [number, number][];
 }

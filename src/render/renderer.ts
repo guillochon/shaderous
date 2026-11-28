@@ -247,9 +247,9 @@ function turned(v: number[], k: number[], angle: number): number[] {
  * The view's box is then the whole configuration, and a fraction f of the computed box is at
  * 0.5 + f / 2 of it (mirrorDisplay); the shaders fold the view's positions back, |2 d - 1|.
  */
-export function mirrorShown(cfg: { ndim: 2 | 3; symmetry?: readonly boolean[]; n?: number; problem?: { mhd?: unknown } }, v: { mirrorImages: boolean }): [boolean, boolean, boolean] {
+export function mirrorShown(cfg: { ndim: 1 | 2 | 3; symmetry?: readonly boolean[]; n?: number; problem?: { mhd?: unknown } }, v: { mirrorImages: boolean }): [boolean, boolean, boolean] {
   const s = cfg.symmetry ?? [];
-  const axes = cfg.ndim === 2 ? [0, 1] : [0, 1, 2];
+  const axes = [0, 1, 2].slice(0, cfg.ndim);
   const all = v.mirrorImages && axes.every((a) => s[a]);
   const rect = cfg.n !== undefined && cfg.problem !== undefined && rectangular(cfg as GridShape);
   return [0, 1, 2].map((a) => (all || rect) && !!s[a]) as [boolean, boolean, boolean];
@@ -596,12 +596,15 @@ export class Renderer {
     }
     // The slice's and the projection's map: one texel per cell of the finest level, on either
     // kind of grid, whatever the display volume is capped at.
+    // A 1D run's map is one texel tall: the slice shader repeats it across the axis the run does
+    // not resolve (plans/one-dimensional.md).
     const side = Math.min(sim.n, d.limits.maxTextureDimension2D);
-    if (!this.map || this.map.width !== side) {
+    const tall = sim.cfg.ndim === 1 ? 1 : side;
+    if (!this.map || this.map.width !== side || this.map.height !== tall) {
       this.map?.destroy();
       this.map = d.createTexture({
         label: 'slice and projection map',
-        size: [side, side],
+        size: [side, tall],
         format: 'rgba16float',
         usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_SRC,
       });
@@ -1065,7 +1068,7 @@ export class Renderer {
       if (plane) {
         cp2.setPipeline(this.pPlane!);
         cp2.setBindGroup(0, this.gPlane[parity]);
-        cp2.dispatchWorkgroups(Math.ceil(side / 16), Math.ceil(side / 8));
+        cp2.dispatchWorkgroups(Math.ceil(side / 16), Math.ceil(this.map!.height / 8));
       }
     }
     cp2.end();
@@ -1118,8 +1121,10 @@ export class Renderer {
     if (!map || !v.contours) return null;
     const side = map.width;
     const clampi = (i: number) => Math.min(side - 1, Math.max(0, i));
+    // (A 1D run's map is one texel tall: every row is its row.)
+    const clampj = (j: number) => Math.min(map.height - 1, Math.max(0, j));
     // The side of the cell under the point, in texels, then the 4 x 4 cell centers around it.
-    const here = await this.readMapTexels(map, [[clampi(Math.floor(a * side)), clampi(Math.floor(b * side))]]);
+    const here = await this.readMapTexels(map, [[clampi(Math.floor(a * side)), clampj(Math.floor(b * side))]]);
     if (!here || map !== this.map) return null;
     const cell = Math.max(here[3], 1);
     const gx = (a * side) / cell - 0.5;
@@ -1127,7 +1132,7 @@ export class Renderer {
     const [ix, iy] = [Math.floor(gx), Math.floor(gy)];
     const [fx, fy] = [gx - ix, gy - iy];
     const spots: [number, number][] = [];
-    for (let j = 0; j < 4; j++) for (let i = 0; i < 4; i++) spots.push([clampi(Math.floor((ix + i - 0.5) * cell)), clampi(Math.floor((iy + j - 0.5) * cell))]);
+    for (let j = 0; j < 4; j++) for (let i = 0; i < 4; i++) spots.push([clampi(Math.floor((ix + i - 0.5) * cell)), clampj(Math.floor((iy + j - 0.5) * cell))]);
     const texels = await this.readMapTexels(map, spots);
     if (!texels || map !== this.map) return null;
     // The cubic B-spline's weights and their derivatives, as in bspline() in the shader.

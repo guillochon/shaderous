@@ -87,7 +87,7 @@ function bounds(z: Zone): { c: number[]; r: number } {
  * points', sampled at most `h` apart (half a finest block, so that no zone a finest block could
  * hold slips between the samples) and at least four to a side.
  */
-export function blockTier(zones: readonly Zone[], lo: number[], side: number, ndim: 2 | 3, h: number): number {
+export function blockTier(zones: readonly Zone[], lo: number[], side: number, ndim: 1 | 2 | 3, h: number): number {
   if (!zones.length) return Infinity;
   const near = zones.filter((z) => {
     const b = bounds(z);

@@ -22,7 +22,7 @@ import { decodeProfileLines, encodeProfileLines, MAX_PROFILES, type Vec3 } from 
 export { MAX_CONTOURS, MAX_DIST, MAX_ZOOM, MIN_DIST };
 
 /** What a fresh visit shows. */
-export const DEFAULT_SETUP = { problem: 'kelvin-helmholtz', ndim: 2 as 2 | 3, n: 512, amr: 3 };
+export const DEFAULT_SETUP = { problem: 'kelvin-helmholtz', ndim: 2 as 1 | 2 | 3, n: 512, amr: 3 };
 
 /**
  * The settings a link carries under keys of the option table (setup/options.ts): each option
@@ -62,7 +62,7 @@ export interface LinkState {
 
 export interface LinkOverrides {
   problem: string;
-  ndim: 2 | 3;
+  ndim: 1 | 2 | 3;
   n: number; // 0: the default for that dimensionality
   amr: number;
   cfg: Partial<Pick<SimConfig, 'symmetry' | 'tEnd' | 'eos' | 'riemann' | 'limiter' | 'cfl' | 'timeBins' | 'refineHi' | 'refineLo' | 'refineRho' | 'gravity' | 'G' | 'vcycles' | 'jeansFloor' | 'jeansCells' | 'gravEnergyFlux' | 'wellBalanced' | 'bcLo' | 'bcHi' | 'cooling' | 'viscosity' | 'conductivity' | 'resistivity' | 'dampRadius' | 'dampRate' | 'radiation' | 'opacity' | 'radC' | 'radChat' | 'radLocalC' | 'radSolver' | 'radSweeps'>>;
@@ -81,17 +81,17 @@ export interface LinkOverrides {
 }
 
 /** The view a preset opens with. */
-export function viewDefaults(problem: Problem, ndim: 2 | 3): ViewState {
+export function viewDefaults(problem: Problem, ndim: 1 | 2 | 3): ViewState {
   const v = defaultView();
   v.field = problem.view?.field ?? 0;
   v.log = problem.view?.log ?? true;
-  v.mode = ndim === 2 ? 'slice' : (problem.view?.mode ?? 'volume');
-  v.sliceAxis = ndim === 2 ? 2 : (problem.view?.axis ?? 2);
+  v.mode = ndim < 3 ? 'slice' : (problem.view?.mode ?? 'volume');
+  v.sliceAxis = ndim < 3 ? 2 : (problem.view?.axis ?? 2);
   v.pitch = problem.view?.pitch ?? 0.45;
   // A magnetized run shows its field lines.
   v.fieldLines = !!problem.mhd;
   // 2D: contours of the flux function, fewer than the tubes of 3D.
-  v.fieldLineCount = ndim === 2 ? 24 : 160;
+  v.fieldLineCount = ndim < 3 ? 24 : 160;
   return v;
 }
 
@@ -124,7 +124,7 @@ export function linkKeys(): LinkKey[] {
   return [
     { key: 'problem', group: 'run', about: 'Preset id' },
     { key: 'setup', group: 'run', about: 'A setup document of one’s own, packed (with problem=custom)' },
-    { key: 'dim', group: 'run', about: '2 or 3 dimensions' },
+    { key: 'dim', group: 'run', about: '1, 2 or 3 dimensions' },
     { key: 'n', group: 'run', about: 'Cells per side (the finest level’s on an adaptive mesh). Left out: the preset’s own grid' },
     { key: 'amr', group: 'run', about: 'Levels of refinement, 0 to 7. With n but no amr, the grid is uniform' },
     { key: 'tend', group: 'settings', about: 'End time (inf for none)' },
@@ -286,7 +286,7 @@ function decodeRenamed(q: URLSearchParams, report?: LinkReport): LinkOverrides {
   const dim = q.get('dim');
   const out: LinkOverrides = {
     problem,
-    ndim: known ? (dim ? (dim === '2' ? 2 : 3) : (grid?.ndim ?? 3)) : DEFAULT_SETUP.ndim,
+    ndim: known ? (dim ? (dim === '1' ? 1 : dim === '2' ? 2 : 3) : (grid?.ndim ?? 3)) : DEFAULT_SETUP.ndim,
     n: known ? (q.has('n') ? Math.max(0, Math.round(+q.get('n')! || 0)) : (grid?.n ?? 0)) : DEFAULT_SETUP.n,
     amr: known ? Math.min(MAX_AMR_LEVELS, Math.max(0, Math.round(q.has('amr') ? +q.get('amr')! || 0 : q.has('n') ? 0 : (grid?.amr ?? 0)))) : DEFAULT_SETUP.amr,
     cfg: {},
@@ -389,7 +389,7 @@ function decodeRenamed(q: URLSearchParams, report?: LinkReport): LinkOverrides {
   // to plot them along, so that what comes without them is reported, not passed over.
   const prof = q.get('prof');
   const lines = prof ? decodeProfileLines(prof, out.ndim) : null;
-  if (prof && !lines) rejected('prof', prof, `not ${out.ndim === 2 ? 'x0,y0,x1,y1' : 'x0,y0,z0,x1,y1,z1'} lines in fractions of the box, at most ${MAX_PROFILES}`);
+  if (prof && !lines) rejected('prof', prof, `not ${out.ndim === 1 ? 'x0,x1' : out.ndim === 2 ? 'x0,y0,x1,y1' : 'x0,y0,z0,x1,y1,z1'} lines in fractions of the box, at most ${MAX_PROFILES}`);
   /** A list of the profile keys, each entry a whole number from 0 to `hi` or empty; null if malformed. */
   const list = (key: string, hi: number): (number | null)[] | undefined => {
     const raw = q.get(key);

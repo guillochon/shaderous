@@ -8,7 +8,7 @@ import type { TestDef } from './tests';
 import { preset } from '../presets/index';
 
 /** A periodic box of liquid with a cylinder (a sphere in 3D), and a slab of it moving toward the body. */
-function boxSpec(o: { n: number; box: number; radius: number; center: [number, number]; v: number; c: number; nu: number; slab?: boolean; ndim?: 2 | 3 }): SetupSpec {
+function boxSpec(o: { n: number; box: number; radius: number; center: [number, number]; v: number; c: number; nu: number; slab?: boolean; ndim?: 1 | 2 | 3 }): SetupSpec {
   return {
     format: 'shaderous-setup', version: 1, id: 'cut-test', name: 'Cut cells',
     domain: { ndim: o.ndim ?? 2, n: o.n, amr: 0, box: o.box, supports2d: true, bc: { lo: [0, 0, 0], hi: [0, 0, 0] } },

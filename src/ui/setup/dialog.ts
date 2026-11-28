@@ -293,8 +293,8 @@ function build() {
     const out = cloneSetup(spec);
     const run = safe(() => host.running().domain, undefined) ?? {};
     const d = (out.domain ??= {});
-    if (d.ndim === undefined) d.ndim = d.supports2d ? (run.ndim ?? 3) : 3;
-    if (d.n === undefined) d.n = d.ndim === run.ndim && run.n ? run.n : d.ndim === 2 ? 512 : 128;
+    if (d.ndim === undefined) d.ndim = (run.ndim === 1 && d.supports1d) || (run.ndim === 2 && d.supports2d) ? run.ndim : 3;
+    if (d.n === undefined) d.n = d.ndim === run.ndim && run.n ? run.n : defaultN(d.ndim);
     if (d.amr === undefined) d.amr = d.ndim === run.ndim && d.n === run.n ? (run.amr ?? 0) : 0;
     return out;
   }
@@ -430,15 +430,16 @@ function build() {
   // cannot hold changes the other, and the menus mark such choices with an asterisk.
   type Grids = ReturnType<SetupHost['grids']>;
   const levelsLabel = (l: number) => (l === 0 ? 'Uniform' : `${l} level${l > 1 ? 's' : ''}`);
-  const cellsLabel = (n: number, ndim: 2 | 3) => `${n}${ndim === 2 ? '²' : '³'}`;
+  const cellsLabel = (n: number, ndim: 1 | 2 | 3) => (ndim === 1 ? `${n}` : `${n}${ndim === 2 ? '²' : '³'}`);
+  const resList = (g: Grids, ndim: 1 | 2 | 3) => (ndim === 1 ? g.res1d : ndim === 2 ? g.res2d : g.res3d);
   const mostLevels = (g: Grids, n: number) => Math.max(0, safe(() => g.maxLevels(n), 0));
-  const fits = (g: Grids, n: number, ndim: 2 | 3, l: number) => l <= mostLevels(g, n) && safe(() => g.fits(n, ndim, l), true);
+  const fits = (g: Grids, n: number, ndim: 1 | 2 | 3, l: number) => l <= mostLevels(g, n) && safe(() => g.fits(n, ndim, l), true);
 
   /**
    * The levels to go with resolution n, from `want`: no more than n leaves a whole root block
    * for, and if that grid is too large for the GPU memory, the fewest more that make it fit.
    */
-  function levelsFor(g: Grids, n: number, ndim: 2 | 3, want: number): number {
+  function levelsFor(g: Grids, n: number, ndim: 1 | 2 | 3, want: number): number {
     const most = mostLevels(g, n);
     const l = Math.min(want, most);
     if (fits(g, n, ndim, l)) return l;
@@ -451,8 +452,8 @@ function build() {
    * block (16 << levels), and if that grid is too large for the GPU memory, the largest lower
    * one that fits.
    */
-  function resolutionFor(g: Grids, n: number, ndim: 2 | 3, levels: number): number {
-    const list = ndim === 2 ? g.res2d : g.res3d;
+  function resolutionFor(g: Grids, n: number, ndim: 1 | 2 | 3, levels: number): number {
+    const list = resList(g, ndim);
     if (levels > mostLevels(g, n)) n = list.find((m) => m >= n && mostLevels(g, m) >= levels) ?? n;
     if (!fits(g, n, ndim, levels)) n = [...list].reverse().find((m) => m < n && fits(g, m, ndim, levels)) ?? n;
     return n;
@@ -463,10 +464,10 @@ function build() {
     if (path !== 'domain.n' && path !== 'domain.amr') return undefined;
     const g = safe(() => host.grids(), null);
     if (!g) return undefined;
-    const ndim = draft.domain?.ndim === 2 ? 2 : 3;
+    const ndim = draft.domain?.ndim ?? 3;
     const amr = draft.domain?.amr ?? 0;
     if (path === 'domain.n') {
-      const choices: FormChoice[] = (ndim === 2 ? g.res2d : g.res3d).map((n) => {
+      const choices: FormChoice[] = resList(g, ndim).map((n) => {
         const l = levelsFor(g, n, ndim, amr);
         const label = cellsLabel(n, ndim);
         if (l === amr) return { value: n, label };
@@ -493,9 +494,9 @@ function build() {
     const g = safe(() => host.grids(), null);
     const d = draft.domain;
     if (!g || !d) return;
-    const ndim = d.ndim === 2 ? 2 : 3;
-    const list = ndim === 2 ? g.res2d : g.res3d;
-    if (d.n !== undefined && list.length && !list.includes(d.n)) d.n = list.includes(ndim === 2 ? 512 : 128) ? (ndim === 2 ? 512 : 128) : list[0];
+    const ndim = d.ndim ?? 3;
+    const list = resList(g, ndim);
+    if (d.n !== undefined && list.length && !list.includes(d.n)) d.n = list.includes(defaultN(ndim)) ? defaultN(ndim) : list[0];
     if (d.n === undefined) return;
     if (changed === 'domain.amr') d.n = resolutionFor(g, d.n, ndim, d.amr ?? 0);
     else d.amr = levelsFor(g, d.n, ndim, d.amr ?? 0);
@@ -1133,6 +1134,9 @@ let dialog: ReturnType<typeof build> | null = null;
  * dropped or held, to show). Made once and used again; opening it while it is open loads the
  * file into it.
  */
+
+/** The resolution a grid of these dimensions opens on. */
+const defaultN = (ndim: 1 | 2 | 3) => (ndim === 1 ? 4096 : ndim === 2 ? 512 : 128);
 export function openSetupDialog(host: SetupHost, opts: { file?: SetupSpec; notes?: string[] } = {}): void {
   (dialog ??= build()).open(host, opts);
 }

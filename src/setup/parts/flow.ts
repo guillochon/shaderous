@@ -30,7 +30,7 @@ export interface FlowField {
 export interface FlowContext {
   spec: SetupSpec;
   box: number;
-  ndim: 2 | 3;
+  ndim: 1 | 2 | 3;
   G: number;
   units?: UnitSystem;
   /** the run's species, in order */

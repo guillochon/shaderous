@@ -88,7 +88,7 @@ function motionWgsl(m: Motion | undefined, i: number): string {
  * WGSL of a shape's signed distance at the start, `dist_<i>(x)`, in the box's coordinates:
  * negative inside. A box's open sides are far away.
  */
-function distWgsl(shape: Shape, i: number, box: number, n: number, ndim: 2 | 3): string {
+function distWgsl(shape: Shape, i: number, box: number, n: number, ndim: 1 | 2 | 3): string {
   if (shape.type === 'sphere') {
     const r = shape.radiusCells !== undefined ? shape.radiusCells * (box / n) : (shape.radius ?? 0.1 * box);
     const c = shape.center ?? [0, 0, 0];
@@ -135,7 +135,7 @@ export function movingFlags(bodies: MovingBody[], fractions = false): string {
  * `moving_at(x)`, the mark and velocity a point of the box takes from the bodies (mark 0
  * where none holds it), given the poses the pose pass wrote (POSES).
  */
-export function movingBodies(bodies: MovingBody[], ctx: { box: number; n: number; ndim: 2 | 3 }): string {
+export function movingBodies(bodies: MovingBody[], ctx: { box: number; n: number; ndim: 1 | 2 | 3 }): string {
   if (bodies.length > MAX_MOVING) throw new Error(`a run holds at most ${MAX_MOVING} moving bodies`);
   let s = `const N_MOVING = ${bodies.length}u;\n`;
   s += bodies.map((b, i) => motionWgsl(b.motion, i)).join('');

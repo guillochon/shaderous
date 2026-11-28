@@ -13,7 +13,7 @@ import { BS, PAD } from '../amr/tree';
  * atlas (render/renderer.ts, rgba16float), a field's faces at one parity, and the species'
  * groups at one parity with the composition's moments.
  */
-export function viewBlockBytes(ndim: 2 | 3, mhd: boolean, speciesGroups: number, composition: boolean): number {
+export function viewBlockBytes(ndim: 1 | 2 | 3, mhd: boolean, speciesGroups: number, composition: boolean): number {
   const texel = 3 * 16 + 8 + (mhd ? 16 : 0) + speciesGroups * 16 + (composition ? 16 : 0);
   return PAD ** ndim * texel;
 }
@@ -430,14 +430,14 @@ export function blocksOfUniform(r: AthdfReader): AthdfReader {
 export function probeFile(r: AthdfReader, points: number[][]): { at: number[]; level: number; values: Record<string, number> }[] {
   const raw = r.header();
   const head = r.finish(r.header());
-  const flat = head.ndim === 2;
+  const flat = head.ndim < 3;
   const top = maxLevel(head);
   const rootBlocks = head.rootSize.map((n, a) => n / head.blockSize[a]);
   const index = new Map<number, number>();
   for (let b = 0; b < head.levels.length; b++) index.set(key(head.levels[b], head.locations[3 * b], head.locations[3 * b + 1], flat ? 0 : head.locations[3 * b + 2]), b);
   // (A cylindrical file's own order is (R, phi, z), io/athdf.ts swapAxes23: its cells are the same in memory.)
   return points.map((p) => {
-    const f = [0, 1, 2].map((a) => (flat && a === 2 ? 0 : Math.min(Math.max(p[a] ?? 0, 0), 1 - 1e-7)));
+    const f = [0, 1, 2].map((a) => (a >= head.ndim ? 0 : Math.min(Math.max(p[a] ?? 0, 0), 1 - 1e-7)));
     for (let l = top; l >= 0; l--) {
       const at = [0, 1, 2].map((a) => Math.min(Math.floor(f[a] * (rootBlocks[a] << l)), (rootBlocks[a] << l) - 1));
       const b = index.get(key(l, at[0], at[1], flat ? 0 : at[2]));
@@ -476,7 +476,7 @@ export function bakeVariables(field: number, species: string | null): string[] {
  * the density at each cell, no ghost cells (rg32float), and the display's atlas the ray-marcher
  * reads in 3D (render/renderer.ts, rgba16float, with ghost cells).
  */
-export const viewBakedBlockBytes = (ndim: 2 | 3): number => BS ** ndim * 8 + (ndim === 3 ? PAD ** 3 * 8 : 0);
+export const viewBakedBlockBytes = (ndim: 1 | 2 | 3): number => BS ** ndim * 8 + (ndim === 3 ? PAD ** 3 * 8 : 0);
 
 /** GPU bytes per atlas block of a magnetized run's face field (one rgba32float atlas), which field lines trace. */
-export const viewFacesBlockBytes = (ndim: 2 | 3): number => PAD ** ndim * 16;
+export const viewFacesBlockBytes = (ndim: 1 | 2 | 3): number => PAD ** ndim * 16;

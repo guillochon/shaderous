@@ -155,7 +155,7 @@ export interface SceneBody extends NBody {
 
 export interface Scene {
   box: number;
-  ndim: 2 | 3;
+  ndim: 1 | 2 | 3;
   dx: number;
   faces: { lo: number[]; hi: number[] };
   bodies: SceneBody[];

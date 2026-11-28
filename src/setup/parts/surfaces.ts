@@ -35,7 +35,7 @@ interface Ctx {
   box: number;
   /** finest cells across the box */
   n: number;
-  ndim: 2 | 3;
+  ndim: 1 | 2 | 3;
   /** the run's end time, for what a body sweeps */
   tEnd: number;
   /** the domain's lower corner (domain.ts domainLo) */
@@ -43,7 +43,7 @@ interface Ctx {
 }
 
 /** A shape's signed distance (negative inside), exact, where it has one in closed form. */
-export function shapeDistance(shape: Shape, ctx: { box: number; n: number; ndim: 2 | 3 }): ((x: number, y: number, z: number) => number) | null {
+export function shapeDistance(shape: Shape, ctx: { box: number; n: number; ndim: 1 | 2 | 3 }): ((x: number, y: number, z: number) => number) | null {
   const flat = ctx.ndim === 2;
   if (shape.type === 'sphere') {
     const c = shape.center ?? [0, 0, 0];
@@ -151,7 +151,7 @@ function sweptPoses(chain: Moving[], i: number, ctx: Ctx, reach: number, step: n
  * spheres, boxes and half-spaces, a mesh's distance field (exact within a few finest cells of its
  * surface, clamped beyond) for a mesh. In 2D at z = 0.
  */
-export function obstacleDistances(obstacles: ObstaclePart[], ctx: { box: number; n: number; ndim: 2 | 3 }): { mark: number; distance(x: number, y: number, z: number): number }[] {
+export function obstacleDistances(obstacles: ObstaclePart[], ctx: { box: number; n: number; ndim: 1 | 2 | 3 }): { mark: number; distance(x: number, y: number, z: number): number }[] {
   return obstacles.map((p, i) => {
     const mark = 1 + Math.min(i, MAX_BODIES - 1);
     const d = shapeDistance(p.shape, ctx);

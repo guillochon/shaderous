@@ -39,7 +39,7 @@ const FLAT_WG = 64;
 export const MHD_BLOCK_BYTES = 11 * 16 + 4;
 
 /** Bytes of the flux register per slot: six faces of BS^2 cells (BS in 2D), two vec4 each (mhd/amr_block.wgsl, reg_entry). */
-export const registerBytes = (ndim: 2 | 3) => 6 * (ndim === 3 ? BS * BS : BS) * 32;
+export const registerBytes = (ndim: 1 | 2 | 3) => 6 * (ndim === 3 ? BS * BS : BS) * 32;
 
 /** The most bytes one buffer bound to a pass may have on this device. */
 export const maxBinding = (d: GPUDevice) => Math.min(d.limits.maxBufferSize, d.limits.maxStorageBufferBindingSize);
@@ -153,7 +153,7 @@ export class AmrMhd {
   encodeMagnetic(pass: GPUComputePassEncoder, parity: number) {
     this.redMag.encode(pass, parity);
   }
-  private ndim: 2 | 3;
+  private ndim: 1 | 2 | 3;
   /** With time bins: the passes built to read them, and their bind groups over the substep's lists. */
   private binsOn = false;
   private pCommit?: GPUComputePipeline;

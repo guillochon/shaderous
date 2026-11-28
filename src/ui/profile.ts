@@ -17,9 +17,10 @@ export const PROFILE_MAX_SAMPLES = 16384;
  * The part of the segment from `a` to `b` inside the box [0, 1]^dims (Liang-Barsky), or null if
  * it misses the box or is a point. In 2D the third coordinate is taken as 0.
  */
-export function clipSegment(a0: readonly number[], b0: readonly number[], dims: 2 | 3): [Vec3, Vec3] | null {
-  const a: Vec3 = [a0[0], a0[1], dims === 3 ? (a0[2] ?? 0) : 0];
-  const b: Vec3 = [b0[0], b0[1], dims === 3 ? (b0[2] ?? 0) : 0];
+export function clipSegment(a0: readonly number[], b0: readonly number[], dims: 1 | 2 | 3): [Vec3, Vec3] | null {
+  // (A 1D run's y is where the line is drawn across the repeated axis: the middle if not given.)
+  const a: Vec3 = [a0[0], a0[1] ?? 0.5, dims === 3 ? (a0[2] ?? 0) : 0];
+  const b: Vec3 = [b0[0], b0[1] ?? 0.5, dims === 3 ? (b0[2] ?? 0) : 0];
   if (![...a, ...b].every(Number.isFinite)) return null;
   let t0 = 0;
   let t1 = 1;
@@ -396,21 +397,27 @@ export function sampleNear(s: ArrayLike<number>, target: number): number {
   return Math.abs(s[lo] - target) <= Math.abs(s[hi] - target) ? lo : hi;
 }
 
-/** The lines of a link's `prof`: each `x0,y0,x1,y1` (2D) or `x0,y0,z0,x1,y1,z1` (3D) in fractions of the box, `;` between lines. */
-export function encodeProfileLines(lines: { a: readonly number[]; b: readonly number[] }[], dims: 2 | 3): string {
+/**
+ * The lines of a link's `prof`: each `x0,y0,x1,y1` (2D) or `x0,y0,z0,x1,y1,z1` (3D) in fractions
+ * of the box, `;` between lines; in 1D `x0,x1`, the ends along the one axis (or r, R), which is all
+ * a 1D line says (plans/one-dimensional.md).
+ */
+export function encodeProfileLines(lines: { a: readonly number[]; b: readonly number[] }[], dims: 1 | 2 | 3): string {
   const f = (v: number) => String(+v.toFixed(4));
   return lines.map((l) => [...l.a.slice(0, dims), ...l.b.slice(0, dims)].map(f).join(',')).join(';');
 }
 
 /** The lines of a link's `prof` (encodeProfileLines), clipped to the box; null if any is not one. */
-export function decodeProfileLines(raw: string, dims: 2 | 3): [Vec3, Vec3][] | null {
+export function decodeProfileLines(raw: string, dims: 1 | 2 | 3): [Vec3, Vec3][] | null {
   const parts = raw.split(';').filter(Boolean);
   if (!parts.length || parts.length > MAX_PROFILES) return null;
   const out: [Vec3, Vec3][] = [];
   for (const part of parts) {
     const v = part.split(',').map((x) => (x.trim() === '' ? NaN : Number(x)));
-    if (v.length !== 2 * dims || !v.every((x) => Number.isFinite(x) && x >= 0 && x <= 1)) return null;
-    const c = clipSegment(v.slice(0, dims), v.slice(dims), dims);
+    // (A 1D link may also carry 2D ends: their y is kept, where the line is drawn.)
+    const k = dims === 1 && v.length === 4 ? 2 : dims;
+    if (v.length !== 2 * k || !v.every((x) => Number.isFinite(x) && x >= 0 && x <= 1)) return null;
+    const c = clipSegment(v.slice(0, k), v.slice(k), dims);
     if (!c) return null;
     out.push(c);
   }

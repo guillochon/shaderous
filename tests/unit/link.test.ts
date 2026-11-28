@@ -5,7 +5,7 @@ import { defaultOpacity } from '../../src/render/transfer';
 import { DEFAULT_SETUP, decodeLink, encodeLink, KEY_ALIASES, PROBLEM_ALIASES, snapshotSettings, viewDefaults, type LinkReport } from '../../src/ui/link';
 import { SNAPSHOT_FORMAT, type SnapshotMeta } from '../../src/io/snapshot';
 
-const state = (id: string, n: number, ndim: 2 | 3, amrLevels = 0) => {
+const state = (id: string, n: number, ndim: 1 | 2 | 3, amrLevels = 0) => {
   const problem = problemById(id);
   return { cfg: configFor(problem, n, { ndim, amrLevels }), view: viewDefaults(problem, ndim), auto: true, colormap: 'inferno', opacity: defaultOpacity() };
 };

@@ -61,7 +61,7 @@ function heliumEos(eos: Eos): Eos {
 }
 
 /** The hot spot's internal energy density at a point, or undefined outside it (or outside the star's helium). */
-function spot(ctx: FlowInitContext, p: Shell, ndim: 2 | 3) {
+function spot(ctx: FlowInitContext, p: Shell, ndim: 1 | 2 | 3) {
   const { rBase, rSpot, center } = layout(ctx, p);
   const he = heliumEos(ctx.eos);
   const T = (p.tign * 1e9) / ctx.eos.params.helmT;

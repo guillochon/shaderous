@@ -231,12 +231,14 @@ fn sph_grid() -> SphGrid {
 // s = sinh(D/2) by doubling, s' = 2 s sqrt(1 + s^2), which cancels nothing: e^(D/2) = c + s,
 // sinh D = 2 s c, sinh(3D/2) = s (3 + 4 s^2), with c = sqrt(1 + s^2). At c = 0, Params' own.
 fn sph_level(c: i32) -> SphGrid {
-  if (c <= 0) { return SphGrid(P.sph.x, P.sph.y, P.sph.z, i32(P.n), P.sph2); }
+  if (c <= 0) { return SphGrid(P.sph.x, P.sph.y, P.sph.z, select(i32(P.n), 1, P.dims.y == 1u), P.sph2); }
   let f = f32(1 << u32(c));
   var s = 0.5 * P.sph2.w;
   for (var m = 0; m < c; m++) { s = 2.0 * s * sqrt(1.0 + s * s); }
   let ch = sqrt(1.0 + s * s);
   let k = vec4<f32>(ch + s, 1.5 / max(s * (3.0 + 4.0 * s * s), 1.0e-30), 2.0 * s * ch, 2.0 * s);
+  // (A 1D run's one theta cell spans the sphere on every level: plans/one-dimensional.md.)
+  if (P.dims.y == 1u) { return SphGrid(P.sph.x / f, P.sph.y * f, P.sph.z, 1, k); }
   return SphGrid(P.sph.x / f, P.sph.y * f, P.sph.z * f, i32(P.n) >> u32(c), k);
 }
 // sin(theta) of the polar face j (0 to n), formed from the nearer pole so that both are exactly 0.
@@ -335,10 +337,11 @@ var<private> g_sph_geo: vec2<f32> = vec2<f32>(0.0);
 // back. With the corner at -box/2 these are x / box + 0.5 and (f - 0.5) box, bit for bit.
 // The uniform grid's cells along each axis: n, or n / 2 along a mirrored axis halved on a
 // rectangular grid (src/domain.ts gridDims, P.dims.w). (On blocks, P.n is the finest level's
-// count and the boundary mapping takes it along x and y, as it always did.)
+// count and the boundary mapping takes it along x and y, as it always did.) A 1D run has one
+// cell along y as along z (P.dims.y 1, plans/one-dimensional.md).
 fn grid_n() -> vec3<i32> {
   if (P.dims.w == 1u) { return vec3<i32>(P.dims.xyz); }
-  return vec3<i32>(i32(P.n), i32(P.n), i32(P.dims.z));
+  return vec3<i32>(i32(P.n), select(i32(P.n), 1, P.dims.y == 1u), i32(P.dims.z));
 }
 // Along such a halved axis the computed domain is half the box, and a fraction is of that half.
 fn box_side() -> vec3<f32> {

@@ -207,7 +207,7 @@ export interface ProblemParam {
    */
   kind?: 'number' | 'slider' | 'checkbox';
   /** Shown, and used, only on a grid of this many dimensions. */
-  dims?: 2 | 3;
+  dims?: 1 | 2 | 3;
 }
 
 export interface Problem {
@@ -218,16 +218,16 @@ export interface Problem {
    * On an adaptive mesh, the obstacles' surfaces that ask for refinement (setup/parts/surfaces.ts,
    * amr/bodies.ts), for a grid of `n` finest cells across with lower corner `lo`.
    */
-  surfaces?: (n: number, ndim: 2 | 3, lo: readonly number[], params?: Record<string, number>) => import('../setup/parts/surfaces').BodySurface[];
+  surfaces?: (n: number, ndim: 1 | 2 | 3, lo: readonly number[], params?: Record<string, number>) => import('../setup/parts/surfaces').BodySurface[];
   /**
    * Every obstacle's signed distance (negative inside) where it starts, with its cells' mark: what
    * partly filled cells are cut from (hydro/cut.ts), for a grid of `n` finest cells across.
    */
-  obstacleDistances?: (n: number, ndim: 2 | 3, params?: Record<string, number>) => { mark: number; distance(x: number, y: number, z: number): number }[];
+  obstacleDistances?: (n: number, ndim: 1 | 2 | 3, params?: Record<string, number>) => { mark: number; distance(x: number, y: number, z: number): number }[];
   /** Obstacles that move (hydro/moving.ts), with their motions and chains: the uniform grid's stamp and exchange passes. */
   moving?: import('../hydro/moving').MovingBody[];
   /** The scales of the force coefficients (Diagnostics.bodies' coefficients), if there are any: fixed, or for the run's grid. */
-  forceRef?: ForceRef | ((ndim: 2 | 3, n: number, params?: Record<string, number>) => ForceRef | undefined);
+  forceRef?: ForceRef | ((ndim: 1 | 2 | 3, n: number, params?: Record<string, number>) => ForceRef | undefined);
   label: string;
   blurb: string;
   eos: EosKind;
@@ -280,6 +280,8 @@ export interface Problem {
   jeansCells?: number;
   /** The setup also makes sense on a 2D (x, y) grid. */
   supports2d?: boolean;
+  /** The setup also makes sense on a 1D grid: along x, r or R (plans/one-dimensional.md). */
+  supports1d?: boolean;
   /** Boundaries to use in 2D, if they differ (z is always periodic there). */
   bc2d?: { lo: Bc3; hi: Bc3 };
   /**
@@ -298,14 +300,14 @@ export interface Problem {
    * masses sit in: on an adaptive mesh, the finest level's if `refineMasses` is set, otherwise
    * the coarsest level's.
    */
-  masses?: (params: Record<string, number>, G: number, dx: number, ndim: 2 | 3) => PointMass[];
+  masses?: (params: Record<string, number>, G: number, dx: number, ndim: 1 | 2 | 3) => PointMass[];
   /**
    * The grid the preset opens on: dimensions, cells per side (the finest level's on an
    * adaptive mesh) and levels of refinement. Picking the preset from the menu switches to it,
    * and a link that names the preset without a grid gets it. Without one, the menu keeps the
    * grid already chosen and a link gets the 3D default. Memory limits still apply.
    */
-  grid?: { ndim?: 2 | 3; n?: number; amr?: number };
+  grid?: { ndim?: 1 | 2 | 3; n?: number; amr?: number };
   /**
    * Debris energies (debris/debris.ts): bin the gas by its specific orbital energy about one
    * point mass, both what leaves the box and what is still in it, for the rate at which bound
@@ -337,7 +339,7 @@ export interface Problem {
    * (gravity/bh_kick.wgsl follow_binary). `release`: once that mass no longer looks like a binary
    * (after a merger), the frame comes to rest instead, over about an orbit.
    */
-  rotation?: (params: Record<string, number>, ndim: 2 | 3) => { omega: [number, number, number]; centrifugal?: boolean; track?: { rhoMin: number; release?: boolean } };
+  rotation?: (params: Record<string, number>, ndim: 1 | 2 | 3) => { omega: [number, number, number]; centrifugal?: boolean; track?: { rhoMin: number; release?: boolean } };
   /**
    * The mirrors the setup is symmetric under, each a plane through the origin normal to an axis:
    * a run may then compute only the part above them (SimConfig.symmetry). `mhd`: its magnetic
@@ -423,7 +425,7 @@ export interface Problem {
   /** Turbulence driving switched on by default (see SimConfig.driving). */
   driving?: Partial<import('../hydro/drive').DriveParams>;
   /** Uniform external gravitational acceleration, which may depend on the dimensionality. */
-  gext?: (ndim: 2 | 3) => [number, number, number];
+  gext?: (ndim: 1 | 2 | 3) => [number, number, number];
   /** A polytropic star at rest, settled into the grid's own hydrostatic balance before the run (problems/settle.ts). */
   star?: StarSpec;
   /** Stars of any cold equation of state, at rest or moving, to settle likewise (in place of `star`). */
@@ -458,7 +460,7 @@ export interface Problem {
   setup?: SetupSpec;
   /** Returns the initial primitive state as a function of position. */
   /** `levels`: on blocks, the refinement levels above the coarsest (n is the finest grid's): what a painter that must reach the coarsest cells (a tunnel's inlet) needs */
-  init(n: number, eos: Eos, ndim: 2 | 3, params: Record<string, number>, levels?: number): (x: number, y: number, z: number) => Prim;
+  init(n: number, eos: Eos, ndim: 1 | 2 | 3, params: Record<string, number>, levels?: number): (x: number, y: number, z: number) => Prim;
 }
 
 /**
@@ -469,8 +471,8 @@ export interface Problem {
  * Positions are relative to the box center; `axis` is the face normal (0 x, 1 y, 2 z).
  */
 export interface MhdSpec {
-  potential?: (params: Record<string, number>, ndim: 2 | 3) => (x: number, y: number, z: number) => [number, number, number];
-  face?: (params: Record<string, number>, ndim: 2 | 3) => (axis: number, x: number, y: number, z: number) => number;
+  potential?: (params: Record<string, number>, ndim: 1 | 2 | 3) => (x: number, y: number, z: number) => [number, number, number];
+  face?: (params: Record<string, number>, ndim: 1 | 2 | 3) => (axis: number, x: number, y: number, z: number) => number;
   /**
    * Or every face at once, as mhd/mhd.ts initialFaces lays them out for a grid of n cells per
    * side and nz along z: a run restarted from a file (io/capture.ts restartFrom).

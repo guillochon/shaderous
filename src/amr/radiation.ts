@@ -229,7 +229,7 @@ export class AmrRad {
   }
 
   /** GPU bytes per block. */
-  static blockBytes(ndim: 2 | 3): number {
+  static blockBytes(ndim: 1 | 2 | 3): number {
     return PAD ** ndim * AmrRad.texelBytes;
   }
 

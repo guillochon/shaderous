@@ -82,7 +82,7 @@ export interface Feature {
 }
 
 /** Options that are not about the run: names, the opening view, the clock, the editing tools. */
-const NOT_RUN = /^(name|blurb|run\.|view\.|physics\.toolScale|domain\.supports2d|domain\.symmetric$|domain\.bc$)/;
+const NOT_RUN = /^(name|blurb|run\.|view\.|physics\.toolScale|domain\.supports[12]d|domain\.symmetric$|domain\.bc$)/;
 /** Fields of a mesh shape: no mesh file is at hand. */
 const MESH_ONLY = /^shape\.(file|anchor|node|fit|scale|up)$/;
 
@@ -92,7 +92,7 @@ const MESH_ONLY = /^shape\.(file|anchor|node|fit|scale|up)$/;
  */
 export const EXCLUDED: Record<string, string> = {
   'shape.type=mesh': 'needs a mesh file beside the document',
-  'run, view, name, blurb, toolScale, supports2d, symmetric': 'say nothing about the run',
+  'run, view, name, blurb, toolScale, supports2d, supports1d, symmetric': 'say nothing about the run',
 };
 
 const isDefault = (o: Option, v: Value) => o.default !== undefined && String(o.default) === String(v);
@@ -143,7 +143,7 @@ export function features(): Feature[] {
 
 const trivial = (v: unknown) => v === undefined || v === null || v === false || v === 0 || v === '';
 const facesOf = (s: SetupSpec): number[] => {
-  const k = (s.domain?.ndim ?? 3) === 2 ? 2 : 3;
+  const k = s.domain?.ndim ?? 3;
   return [...(s.domain?.bc?.lo ?? [1, 1, 1]).slice(0, k), ...(s.domain?.bc?.hi ?? [1, 1, 1]).slice(0, k)];
 };
 
@@ -204,13 +204,13 @@ interface Ctx {
 }
 
 const curved = (d: SetupSpec) => ['cylindrical', 'spherical'].includes(d.domain?.geometry ?? 'cartesian');
-const ndimOf = (d: SetupSpec) => (d.domain?.ndim ?? 3) as 2 | 3;
+const ndimOf = (d: SetupSpec) => (d.domain?.ndim ?? 3) as 1 | 2 | 3;
 
 /** A resolution and refinement that run in a few seconds and fit in about 4 GB. */
 function setGrid(doc: SetupSpec, g: Rng, amr?: number) {
   const d = (doc.domain ??= {});
   d.amr = amr ?? g.pick([0, 0, 1, 2]);
-  d.n = ndimOf(doc) === 2 ? g.pick([128, 256, 512]) : d.amr ? g.pick([128, 256]) : g.pick([64, 64, 128]);
+  d.n = ndimOf(doc) === 1 ? g.pick([512, 1024, 2048]) : ndimOf(doc) === 2 ? g.pick([128, 256, 512]) : d.amr ? g.pick([128, 256]) : g.pick([64, 64, 128]);
   clampGrid(doc);
 }
 
@@ -225,6 +225,8 @@ function clampGrid(doc: SetupSpec) {
   if (ndimOf(doc) === 3 && (!d.amr || doc.physics?.shear)) d.n = Math.min(d.n ?? 128, 128);
   if (ndimOf(doc) === 3 && d.amr) d.n = Math.min(d.n ?? 128, 256);
   if (ndimOf(doc) === 2) d.n = (d.amr ?? 0) >= 6 && !doc.physics?.shear ? 16 << d.amr! : Math.min(d.n ?? 256, 1024);
+  // 1D: uniform up to 2048 cells (a 3D texture's side); on blocks, at least two root blocks.
+  if (ndimOf(doc) === 1) d.n = d.amr ? Math.max(32 << d.amr, Math.min(d.n ?? 1024, 16384)) : Math.min(d.n ?? 1024, 2048);
 }
 
 /** A place for a body or a shape: on the axis in (R, z) and (r, theta) runs. */
@@ -302,7 +304,8 @@ function setGeometry(doc: SetupSpec, geometry: 'cartesian' | 'cylindrical' | 'sp
     return;
   }
   d.geometry = geometry;
-  if (d.ndim !== 2) {
+  // (A curved run is 2D, or 1D in r or R.)
+  if (d.ndim !== 2 && d.ndim !== 1) {
     d.ndim = 2;
     setGrid(doc, g, d.amr);
   }
@@ -318,9 +321,10 @@ function setGeometry(doc: SetupSpec, geometry: 'cartesian' | 'cylindrical' | 'sp
   for (const p of doc.parts ?? []) if ((p.kind === 'star' || p.kind === 'mass') && p.pos) p.pos = [0, geometry === 'spherical' ? 0 : p.pos[1], 0];
 }
 
-function setNdim(doc: SetupSpec, ndim: 2 | 3, ctx: Ctx): boolean {
+function setNdim(doc: SetupSpec, ndim: 1 | 2 | 3, ctx: Ctx): boolean {
   const d = (doc.domain ??= {});
   if (ndim === 2 && !d.supports2d) return false;
+  if (ndim === 1 && !d.supports1d) return false;
   if (ndim === 3 && curved(doc)) setGeometry(doc, 'cartesian', ctx.g);
   if (ndimOf(doc) === ndim) return true;
   d.ndim = ndim;
@@ -670,8 +674,12 @@ const holds = (r: Rule, facts: Record<string, Value>) => {
  * returns false where it cannot.
  */
 const FIXERS: Record<string, (doc: SetupSpec, want: boolean, value: Value | undefined, ctx: Ctx) => boolean> = {
-  'domain.ndim': (doc, want, value, ctx) => setNdim(doc, (want ? value : value === 3 ? 2 : 3) as 2 | 3, ctx),
+  'domain.ndim': (doc, want, value, ctx) => setNdim(doc, (want ? value : value === 3 ? 2 : 3) as 1 | 2 | 3, ctx),
   'domain.supports2d': (doc, want) => !want || !!doc.domain?.supports2d,
+  'domain.supports1d': (doc, want) => !want || !!doc.domain?.supports1d,
+  // (What a 1D run does not take is too much to strip from a document: one that has none of it is drawn instead.)
+  'oneD.blocked': () => false,
+  'parts.starLine': (doc, want) => (want ? false : (removeWhere(doc, (p) => p.kind === 'star' || (p.kind === 'mass' && doc.domain?.geometry !== 'spherical')), true)),
   'domain.space3': (doc, want, _v, ctx) => (want ? (ctx.g.rnd() < 0.6 || !doc.domain?.supports2d ? setNdim(doc, 3, ctx) : (setGeometry(doc, 'cylindrical', ctx.g), true)) : setNdim(doc, 2, ctx) && (setGeometry(doc, 'cartesian', ctx.g), true)),
   'gravity.selfFlat': (doc, want) => {
     if (want) return false;
@@ -974,7 +982,7 @@ function optionHooks(doc: SetupSpec, path: string, value: Value | Record<string,
       setGeometry(doc, value as 'cartesian', g);
       return true;
     case 'domain.ndim':
-      return setNdim(doc, value as 2 | 3, ctx) || true;
+      return setNdim(doc, value as 1 | 2 | 3, ctx) || true;
     case 'domain.amr':
     case 'domain.n':
       setPath(doc, path, value);
@@ -1163,7 +1171,7 @@ function baseDoc(seed: number, g: Rng): SetupSpec {
     format: SETUP_FORMAT,
     version: SETUP_VERSION,
     name: `random ${seed}`,
-    domain: { ndim: g.pick([2, 2, 3]), box: 1, supports2d: true },
+    domain: { ndim: g.pick([2, 2, 3]), box: 1, supports2d: true, supports1d: true },
     physics: { eos: 'ideal', eosParams: { gamma: g.pick([5 / 3, 1.4, 1.1]) }, gravity: 'off' },
     background: { rho: 1, p: g.pick([1e-4, 0.01, 1]) },
     parts: [],

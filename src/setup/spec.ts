@@ -60,12 +60,14 @@ export interface UnitsSpec {
 
 export interface DomainSpec {
   /** The grid the setup opens on. Absent: the grid already chosen is kept (Problem.grid). */
-  ndim?: 2 | 3;
+  ndim?: 1 | 2 | 3;
   n?: number;
   amr?: number;
   /** side of the box: the domain is [-box/2, box/2]^3 */
   box?: number;
   supports2d?: boolean;
+  /** The setup also makes sense on a 1D grid (plans/one-dimensional.md). */
+  supports1d?: boolean;
   bc?: { lo: Bc3; hi: Bc3 };
   /** boundaries in 2D, where they differ */
   bc2d?: { lo: Bc3; hi: Bc3 };
@@ -573,7 +575,7 @@ export interface Featured {
   step?: number;
   factor?: number;
   control?: 'number' | 'slider' | 'checkbox';
-  dims?: 2 | 3;
+  dims?: 1 | 2 | 3;
   /** shown in this unit with physical readouts: the code value times the featured value of id `times` */
   unit?: { label: string; times: string };
   unitChoices?: { label: string; value: number }[];

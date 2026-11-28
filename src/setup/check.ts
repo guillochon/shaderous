@@ -33,7 +33,7 @@ export interface CheckEnv {
 export interface BuiltSetup {
   G: number;
   box: number;
-  ndim: 2 | 3;
+  ndim: 1 | 2 | 3;
   /** cell size of the document's grid; 0 where it names no resolution */
   dx: number;
   /** the id each part goes by */
@@ -172,7 +172,7 @@ export function buildSetupBodies(spec: SetupSpec): BuiltSetup {
   const parts = partsOf(spec);
   const ids = partIds(parts);
   const box = spec.domain?.box ?? 1;
-  const ndim: 2 | 3 = spec.domain?.ndim === 2 ? 2 : 3;
+  const ndim: 1 | 2 | 3 = spec.domain?.ndim ?? 3;
   const n = spec.domain?.n ?? 0;
   const dx = n > 0 ? box / n : 0;
   const units = plainUnits(spec);
@@ -218,7 +218,7 @@ export function buildSetupBodies(spec: SetupSpec): BuiltSetup {
 }
 
 /** A disk's mass, by integrating its surface density over radius (per unit length in 2D). */
-export function diskMass(d: DiskPart, gm: number, ndim: 2 | 3, box: number): number {
+export function diskMass(d: DiskPart, gm: number, ndim: 1 | 2 | 3, box: number): number {
   const { rIn, rOut, sigma0, cs } = d;
   if (!(rIn > 0) || !(rOut > 0) || !(sigma0 > 0)) return 0;
   const slope = d.slope ?? -1.5;
@@ -276,7 +276,7 @@ function bodiesOf(spec: SetupSpec, built: BuiltSetup): Body[] {
 function checkBodies(spec: SetupSpec, built: BuiltSetup, out: Issue[]): void {
   const bodies = bodiesOf(spec, built);
   const half = built.box / 2;
-  const axes = built.ndim === 2 ? [0, 1] : [0, 1, 2];
+  const axes = [0, 1, 2].slice(0, built.ndim);
   const name = (b: Body) => `${b.star ? 'Star' : 'Point mass'} "${b.id}"`;
   for (const b of bodies) {
     const beyond = Math.max(...axes.map((a) => Math.abs(b.pos[a]) + b.radius - half));
@@ -517,7 +517,7 @@ export function checkSetup(spec: SetupSpec, env: CheckEnv = {}): Issue[] {
       if (p.kind === 'flow' && FLOWS[p.name]?.issues) {
         const units = spec.physics?.cosmology ? undefined : plainUnits(spec);
         const sp = spec.physics?.species;
-        const why = FLOWS[p.name].issues!({ spec, box: spec.domain?.box ?? 1, ndim: spec.domain?.ndim === 2 ? 2 : 3, G: gravConst(spec, units), units, species: sp === 'aprox13' ? NET_SPECIES : sp }, flowValues(p).values as never);
+        const why = FLOWS[p.name].issues!({ spec, box: spec.domain?.box ?? 1, ndim: spec.domain?.ndim ?? 3, G: gravConst(spec, units), units, species: sp === 'aprox13' ? NET_SPECIES : sp }, flowValues(p).values as never);
         if (why) out.push({ level: 'error', path: `parts.${i}`, text: `${label(i)}: ${why}` });
       }
     });

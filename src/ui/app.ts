@@ -38,7 +38,7 @@ import { defaultFrameDt, MAX_BODIES, sizedProblem } from '../problems/types';
 import { EOS_LABELS, eosHasEnergy, makeEos, physicalEosParams, type Eos, type EosKind } from '../eos/eos';
 import { prepareEosTable } from '../eos/tables';
 import { familyById, FIELD_MENU, MAGNETIC_FIELDS, NUCLEAR_HEATING_FIELD, RADIATION_FIELDS, FIELD_TIPS, FIELDS, isSelfGravity, LINEAR_FIELDS, MASS_FRACTION_FIELD, PERIODIC, SIGNED_FIELDS, MENU, type Problem, type ProblemParam, problemUnits } from '../problems';
-import { sphFromView, sphToView, spherical } from '../spherical';
+import { curvedView, sphFromView, sphToView, spherical } from '../spherical';
 import { backgroundCss, cameraFrame, defaultView, mirrorComputed, mirrorShown, Renderer, setFrameTurn, type ProfileValues, type ViewState } from '../render/renderer';
 import { MAX_FIELD_LINES } from '../render/fieldlines';
 import { fitLumps, previewOrbit, type Lump, type Orbit } from '../gravity/preview';
@@ -80,12 +80,29 @@ const number = (id: string, attrs = '', factor = 0) =>
 // leaf index (one entry per finest block, amr/amr_sim.ts) is 64 MB, counted by gridBytes.
 const RES_3D = [32, 64, 128, 256, 512, 1024, 2048, 4096];
 const RES_2D = [128, 256, 512, 1024, 2048, 4096, 8192, 16384];
+// 1D runs (plans/one-dimensional.md): a row of cells, uniform up to the largest.
+const RES_1D = [256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536];
+const resFor = (ndim: 1 | 2 | 3) => (ndim === 1 ? RES_1D : ndim === 2 ? RES_2D : RES_3D);
+/**
+ * A 1D run's chip (plans/one-dimensional.md): what the view repeats, and why, or null for a run
+ * that resolves its plane. The chip over the view and on screenshots and movies says this.
+ */
+function oneDChip(c: SimConfig | undefined): { text: string; title: string } | null {
+  if (!c || c.ndim !== 1) return null;
+  const g = c.problem.geometry;
+  if (g === 'spherical') return { text: 'spherically symmetric', title: 'A 1D run: only r is simulated. The view repeats each radius around the polar angle, as rings' };
+  if (g === 'cylindrical') return { text: 'cylindrically symmetric', title: 'A 1D run: only R is simulated. The view repeats each radius around the polar angle, as rings' };
+  return { text: 'repeated along y', title: 'A 1D run: only x is simulated. The view repeats the row of cells along y, which is not part of the run' };
+}
+/** The grid's size as the page writes it: 512², 128³, or 4096 cells in 1D. */
+const gridLabel = (n: number, ndim: 1 | 2 | 3) => (ndim === 1 ? `1D, ${n} cells` : `${n}${ndim === 2 ? '²' : '³'}`);
 // Largest uniform grids offered; beyond these the mesh must be adaptive. A phone, or a device
 // that crashed before, offers only the ones within its memory budget (gpu/memory.ts).
-const UNIFORM_MAX = { 2: 2048, 3: 256 };
-function uniformMax(ndim: 2 | 3): number {
-  const fits = (ndim === 2 ? RES_2D : RES_3D).filter((n) => n <= UNIFORM_MAX[ndim] && n ** ndim * Sim.cellBytes(ndim) <= memoryBudget());
-  return fits.length ? fits[fits.length - 1] : (ndim === 2 ? RES_2D : RES_3D)[0];
+// (A 1D grid is a row of a 3D texture, whose side WebGPU caps at 2048: past it a 1D grid is adaptive.)
+const UNIFORM_MAX = { 1: 2048, 2: 2048, 3: 256 };
+function uniformMax(ndim: 1 | 2 | 3): number {
+  const fits = resFor(ndim).filter((n) => n <= UNIFORM_MAX[ndim] && n ** ndim * Sim.cellBytes(ndim) <= memoryBudget());
+  return fits.length ? fits[fits.length - 1] : resFor(ndim)[0];
 }
 
 const side = $('side');
@@ -608,7 +625,7 @@ function syncTools() {
   const noTemp = !!cfg && !eosHasEnergy(cfg.eos);
   if (noTemp && tool === 'temperature') tool = null;
   // A star needs self-gravity (3D only), and an equation of state that leaves K free.
-  const noStar = cfg?.ndim === 2
+  const noStar = (cfg?.ndim ?? 3) < 3
     ? 'A star needs self-gravity, which a 2D run does not have'
     : noTemp ? 'This equation of state fixes the pressure of the gas, so a star’s cannot be chosen' : '';
   if (noStar && tool === 'star') tool = null;
@@ -618,7 +635,7 @@ function syncTools() {
   const noObstacle = cfg?.problem.mhd ? 'Obstacles are not available with a magnetic field yet' : '';
   if (noObstacle && tool === 'obstacle') tool = null;
   // A spherical run's cells are not along straight lines of the box.
-  const noProfile = cfg && spherical(cfg) ? 'Profiles are not available on a spherical grid yet' : '';
+  const noProfile = cfg && spherical(cfg) && cfg.ndim > 1 ? 'Profiles are not available on a spherical grid yet' : '';
   if (noProfile && tool === 'profile') tool = null;
   for (const t of TOOLS) {
     const b = $<HTMLButtonElement>(`tool-${t.kind}`);
@@ -1090,7 +1107,7 @@ try {
  * parameter changed). `keepPhysics`: as build() takes it.
  */
 let pending: {
-  pick?: { id: string; n: number; ndim: 2 | 3; levels: number; params?: Record<string, number>; settings?: { setting: Setting; value: unknown }[] };
+  pick?: { id: string; n: number; ndim: 1 | 2 | 3; levels: number; params?: Record<string, number>; settings?: { setting: Setting; value: unknown }[] };
   keepPhysics: boolean;
 } | null = null;
 /** The preset that waits for Run, if it is another than the run's: its own controls are the ones shown. */
@@ -1413,13 +1430,20 @@ function bindRecord() {
 
 /** Reflect cfg and view into the controls. */
 function syncControls() {
-  const two = cfg.ndim === 2;
+  const two = cfg.ndim < 3;
+  // A 1D run says so over the view.
+  const chip = oneDChip(cfg);
+  const chipEl = $('oned-chip');
+  chipEl.hidden = !chip;
+  if (chip) {
+    chipEl.innerHTML = `<b>1D</b> · ${chip.text}`;
+    chipEl.title = chip.title;
+  }
   // A screenshot of the volume is of the view as it is: no region to choose.
   $('shot-region').hidden = !flatView();
   // The preset menus show a choice that waits for Run (Autoload off), else the run's own.
   const g = pending?.pick ?? { id: cfg.problem.id, n: cfg.n, ndim: cfg.ndim, levels: cfg.amrLevels };
   const gProblem = problemOf(g.id);
-  const g2 = g.ndim === 2;
   showProblem(g.id);
   syncProblemParams();
   $<HTMLInputElement>('blocks').checked = view.showBlocks;
@@ -1463,7 +1487,7 @@ function syncControls() {
   const self = isSelfGravity(cfg.gravity);
   $('sum-time').textContent = `${Number.isFinite(cfg.tEnd) ? `to t = ${+cfg.tEnd.toPrecision(6)}` : 'no end'}${ckpt.on ? `, checkpoints every ${+ckpt.every.toPrecision(6)}` : ''}`;
   // What the Setup dialog holds, at a glance: the grid and the gas.
-  $('setup-sum').textContent = `${cfg.viewOnly && !pending ? `View only${cfg.restart && viewNote ? ` (${viewNote})` : ''} · ` : ''}${g.n}${g2 ? '²' : '³'}${g.levels ? `, ${g.levels} level${g.levels > 1 ? 's' : ''}` : ''} · ${gProblem.mhd ? 'MHD' : 'Gas'} · ${EOS_LABELS[pending?.pick ? gProblem.eos : cfg.eos]}`;
+  $('setup-sum').textContent = `${cfg.viewOnly && !pending ? `View only${cfg.restart && viewNote ? ` (${viewNote})` : ''} · ` : ''}${gridLabel(g.n, g.ndim)}${g.levels ? `, ${g.levels} level${g.levels > 1 ? 's' : ''}` : ''} · ${gProblem.mhd ? 'MHD' : 'Gas'} · ${EOS_LABELS[pending?.pick ? gProblem.eos : cfg.eos]}`;
   showCheckpoints();
   // Fields this run cannot show: a z velocity in 2D, heating without a cooling function, and
   // refinement levels on a uniform grid.
@@ -1728,12 +1752,14 @@ function enqueue(job: () => Promise<void>): Promise<void> {
 }
 
 /** The grid a preset gets for the one asked for: what it supports and what fits in GPU memory. */
-function resolveGrid(problem: Problem, n: number, ndim: 2 | 3, levels: number) {
-  if (!problem.supports2d) ndim = 3;
-  // An axisymmetric (R, z) or spherical (r, theta) problem is two-dimensional, whatever was asked.
-  if (problem.geometry === 'cylindrical' || problem.geometry === 'spherical') ndim = 2;
-  const allowed = ndim === 2 ? RES_2D : RES_3D;
-  if (!allowed.includes(n)) n = ndim === 2 ? 512 : 128;
+function resolveGrid(problem: Problem, n: number, ndim: 1 | 2 | 3, levels: number) {
+  if (ndim === 1 && !problem.supports1d) ndim = 2;
+  if (ndim === 2 && !problem.supports2d) ndim = 3;
+  // An axisymmetric (R, z) or spherical (r, theta) problem is two-dimensional (or one-dimensional
+  // in R or r), whatever was asked.
+  if ((problem.geometry === 'cylindrical' || problem.geometry === 'spherical') && ndim === 3) ndim = 2;
+  const allowed = resFor(ndim);
+  if (!allowed.includes(n)) n = ndim === 1 ? 4096 : ndim === 2 ? 512 : 128;
   // Refinement: only where the preset allows it, and no deeper than the resolution permits.
   levels = supportsAmr(problem) ? Math.min(levels, maxAmrLevels(n)) : 0;
   // Enough levels for the root blocks to fit in GPU memory; a grid no level count fits goes
@@ -1745,7 +1771,7 @@ function resolveGrid(problem: Problem, n: number, ndim: 2 | 3, levels: number) {
 }
 
 /** A new problem or grid from the menus: built now, or (Autoload off) left waiting for Run. */
-function load(id: string, n: number, ndim: 2 | 3, levels: number, keepPhysics = false) {
+function load(id: string, n: number, ndim: 1 | 2 | 3, levels: number, keepPhysics = false) {
   if (autoload) return void build(id, n, ndim, levels, keepPhysics);
   // Physics choices carry over only if every change waiting would have kept them.
   // Parameters set for this preset while it waited stay, through a change of its grid.
@@ -1783,7 +1809,7 @@ function loadPending(play?: boolean) {
  * view, panel), and leave the simulation itself waiting for Run or Load, as Autoload off has
  * it: the first load of a page with Autoload off.
  */
-function build(problemId: string, n: number, ndim: 2 | 3, levels: number, keepPhysics = false, link?: LinkOverrides, snap?: Snapshot, hold = false, params?: Record<string, number>, settings?: { setting: Setting; value: unknown }[]) {
+function build(problemId: string, n: number, ndim: 1 | 2 | 3, levels: number, keepPhysics = false, link?: LinkOverrides, snap?: Snapshot, hold = false, params?: Record<string, number>, settings?: { setting: Setting; value: unknown }[]) {
   pending = null; // whatever waited for Run is superseded
   return enqueue(async () => {
     // A custom setup's mesh files: fetched (URLs) or found among those this browser keeps.
@@ -1840,7 +1866,7 @@ function build(problemId: string, n: number, ndim: 2 | 3, levels: number, keepPh
       next.fluff = { ...next.fluff, ...link.fluff };
       next.startDamping = { ...next.startDamping, ...link.startDamping };
       next.driving = { ...next.driving, ...link.driving };
-      if (ndim === 2) {
+      if (ndim < 3) {
         // (An axisymmetric or spherical run has the self-gravity of its rings or shells.)
         if (isSelfGravity(next.gravity) && problem.geometry !== 'cylindrical' && problem.geometry !== 'spherical') next.gravity = 'off';
         next.bcLo = [next.bcLo[0], next.bcLo[1], 0];
@@ -1853,7 +1879,7 @@ function build(problemId: string, n: number, ndim: 2 | 3, levels: number, keepPh
         pushTransfer();
       }
       // Profile lines the link carries: on show once the run is built.
-      if (link.profiles) setLinkProfiles(link.profiles, ndim);
+      if (link.profiles) setLinkProfiles(link.profiles, next);
     }
     // The box is as wide as the run's parameters make it (a preset with a size of its own).
     next.problem = sizedProblem(problem, next.params);
@@ -1875,7 +1901,7 @@ function build(problemId: string, n: number, ndim: 2 | 3, levels: number, keepPh
     if (hold) {
       // Its settings are kept (Load takes them as a change of grid that keeps the physics).
       cfg = next;
-      if (ndim === 2) view.sliceAxis = 2;
+      if (ndim < 3) view.sliceAxis = 2;
       pending = { pick: { id: problemId, n, ndim, levels }, keepPhysics: true };
       running = false;
       setLoadStage('');
@@ -1900,7 +1926,7 @@ function build(problemId: string, n: number, ndim: 2 | 3, levels: number, keepPh
       await new Promise((r) => setTimeout(r, 250));
     }
     cfg = next;
-    if (ndim === 2) view.sliceAxis = 2;
+    if (ndim < 3) view.sliceAxis = 2;
     // The display's pipelines compile alongside the run's own; attach then finds them ready.
     renderer.fieldPipelines(fieldShaderFor(cfg), cfg, cfg.amrLevels > 0 && cfg.ndim === 3).catch(() => {});
     // Shown as soon as it can be drawn; on the adaptive mesh it starts stepping once its update
@@ -2296,7 +2322,7 @@ async function viewProbe(points: number[][]) {
 /** Start the run from a snapshot (one read from an .athdf file), as importAthdf does. */
 async function importSnapshot(snap: Snapshot, opts: ImportOptions = {}): Promise<string[]> {
   {
-    const cubic = snap.rootSize[0] === snap.rootSize[1] && (snap.ndim === 2 || snap.rootSize[2] === snap.rootSize[0]);
+    const cubic = snap.rootSize[0] === snap.rootSize[1] && (snap.ndim < 3 || snap.rootSize[2] === snap.rootSize[0]);
     const width = snap.hi.map((h, a) => h - snap.lo[a]);
     if (!cubic || Math.abs(width[0] - width[1]) > 1e-4 * width[0] || (snap.ndim === 3 && Math.abs(width[0] - width[2]) > 1e-4 * width[0])) {
       throw new Error('only square or cubic domains can be loaded');
@@ -2329,8 +2355,9 @@ async function importSnapshot(snap: Snapshot, opts: ImportOptions = {}): Promise
     else link = decodeLink(new URLSearchParams(linkQuery()));
     if (!own) {
       const problem = problemOf(link.problem);
+      if (snap.ndim === 1 && !problem.supports1d) throw new Error(`this file is 1D, and the ${problem.label} preset is not: pick a 1D preset first`);
       if (snap.ndim === 2 && !problem.supports2d) throw new Error(`this file is 2D, and the ${problem.label} preset is 3D only: pick a 2D preset first`);
-      const allowed = snap.ndim === 2 ? RES_2D : RES_3D;
+      const allowed = resFor(snap.ndim);
       const finest = snap.rootSize[0] << maxLevel(snap);
       const fits = allowed.filter((n) => n <= finest);
       link.ndim = snap.ndim;
@@ -2732,7 +2759,7 @@ function waitingConfig(): SimConfig | null {
 }
 
 /** A preset's configuration on a grid, with parameters set over its defaults (as build() has them). */
-function freshConfig(problem: Problem, g: { n: number; ndim: 2 | 3; levels: number }, params?: Record<string, number>): SimConfig {
+function freshConfig(problem: Problem, g: { n: number; ndim: 1 | 2 | 3; levels: number }, params?: Record<string, number>): SimConfig {
   const c = configFor(problem, g.n, { ndim: g.ndim, amrLevels: g.levels });
   if (params) {
     Object.assign(c.params, params);
@@ -2802,8 +2829,8 @@ const setupHost: SetupHost = {
     }
   },
   grids: () => ({
-    res2d: RES_2D, res3d: RES_3D, uniformMax2d: uniformMax(2), uniformMax3d: uniformMax(3), maxLevels: maxAmrLevels,
-    fits: (n: number, ndim: 2 | 3, levels: number) => (levels > 0 ? amrFits(n, ndim, levels) : n <= uniformMax(ndim)),
+    res1d: RES_1D, res2d: RES_2D, res3d: RES_3D, uniformMax1d: uniformMax(1), uniformMax2d: uniformMax(2), uniformMax3d: uniformMax(3), maxLevels: maxAmrLevels,
+    fits: (n: number, ndim: 1 | 2 | 3, levels: number) => (levels > 0 ? amrFits(n, ndim, levels) : n <= uniformMax(ndim)),
   }),
   link: linkFor,
   units(spec) {
@@ -3085,7 +3112,7 @@ function bind() {
     return Math.hypot(a.x - b.x, a.y - b.y);
   };
   // A slice or a projection (always, in a 2D run) is panned and zoomed in its plane instead of orbited.
-  const flat = () => view.mode !== 'volume' || cfg?.ndim === 2;
+  const flat = () => view.mode !== 'volume' || (cfg?.ndim ?? 3) < 3;
   const clampPan = () => {
     const h = 0.5 / view.zoom;
     view.cx = Math.min(1 - h, Math.max(h, view.cx));
@@ -3294,7 +3321,7 @@ function bind() {
 // --- editing strokes ----------------------------------------------------------------------
 type Vec3 = [number, number, number];
 /** A slice or a projection (always, in a 2D run) rather than the volume view. */
-const flatView = () => view.mode !== 'volume' || cfg?.ndim === 2;
+const flatView = () => view.mode !== 'volume' || (cfg?.ndim ?? 3) < 3;
 const phone = window.matchMedia('(max-width: 700px)');
 /**
  * Where the slice sits at zoom 1: the screen pixels across it, and how far its middle sits left
@@ -3364,7 +3391,7 @@ function locate(px: number, py: number, depth: number): { pos: Vec3; right: Vec3
   const l = locateInView(px, py, depth);
   // A spherical run's slice is the (R, z) half-plane: the point is the cell of its (r, theta),
   // outside the box off the grid; screen-right and screen-up as the cell fractions move there.
-  if (flatView() && spherical(cfg)) {
+  if (flatView() && curvedView(cfg)) {
     const at = (x: number, y: number) => {
       const v = locateInView(x, y, depth).pos;
       return sphFromView(cfg, v[0], v[1]) ?? [-1, -1];
@@ -3389,7 +3416,7 @@ function locateInView(px: number, py: number, depth: number): { pos: Vec3; right
   if (flatView()) {
     const a = view.cx + (px - w / 2 + sliceShift()) / (sliceSpan() * view.zoom);
     const b = view.cy - (py - h / 2) / (sliceSpan() * view.zoom);
-    const axis = cfg.ndim === 2 ? 2 : view.sliceAxis;
+    const axis = cfg.ndim < 3 ? 2 : view.sliceAxis;
     // The middle of the layer of cells on show.
     const k = (Math.min(cfg.n - 1, Math.floor(view.slicePos * cfg.n)) + 0.5) / cfg.n;
     const scale = sliceSpan() * view.zoom;
@@ -3421,7 +3448,7 @@ interface PlacedProfile {
   a: Vec3;
   b: Vec3;
   /** the run's dimensions when it was placed: another kind of run drops it */
-  dims: 2 | 3;
+  dims: 1 | 2 | 3;
   /** index into PROFILE_COLORS */
   color: number;
   /** the samples last read along it, one a field (samplesOf picks the one of a field) */
@@ -3501,9 +3528,27 @@ async function gasDepth(px: number, py: number): Promise<number | null> {
 /** The point of the box under a canvas point at a depth (ignored in a plane), z 0 in 2D. */
 function profilePoint(px: number, py: number, depth: number): Vec3 {
   const p = locate(px, py, depth).pos;
-  if (cfg.ndim === 2) p[2] = 0;
+  if (cfg.ndim < 3) p[2] = 0;
   return p;
 }
+
+/**
+ * A 1D run's profile lines go the one way that is not redundant (plans/one-dimensional.md): in a
+ * Cartesian run, horizontal (the end moved, `moving`, takes the other's y); in a spherical or
+ * axisymmetric one, radial, from the center out to the outer end at its polar angle. Both are
+ * a line of constant y in the grid's fractions (y is theta / pi, or the angle around the disk).
+ * Any other run's line is as it was drawn.
+ */
+function lockedLine(a: Vec3, b: Vec3, moving: 0 | 1 = 1, c: SimConfig = cfg): [Vec3, Vec3] {
+  if (c.ndim !== 1) return [a, b];
+  if (radialProfiles(c)) {
+    const outer = moving === 0 ? a : b;
+    return [[0, outer[1], 0], [outer[0], outer[1], 0]];
+  }
+  return moving === 1 ? [a, [b[0], a[1], 0]] : [[a[0], b[1], 0], b];
+}
+/** A 1D spherical or axisymmetric run, whose profile lines are radial (lockedLine). */
+const radialProfiles = (c: SimConfig | undefined) => !!c && c.ndim === 1 && (c.problem.geometry === 'spherical' || c.problem.geometry === 'cylindrical');
 
 /** Shift: the pointer moved around the press to the nearest 15° step. */
 function snapAngle(x0: number, y0: number, x: number, y: number): [number, number] {
@@ -3536,7 +3581,7 @@ function profilePress(e: PointerEvent): boolean {
   const [px, py] = [e.clientX - r.left, e.clientY - r.top];
   if (profileDraft && profileDraft.id === -1) {
     // The second click of a line placed by clicks.
-    [profileDraft.x, profileDraft.y] = e.shiftKey ? snapAngle(profileDraft.x0, profileDraft.y0, px, py) : [px, py];
+    [profileDraft.x, profileDraft.y] = e.shiftKey && cfg.ndim > 1 ? snapAngle(profileDraft.x0, profileDraft.y0, px, py) : [px, py];
     finishDraft();
     return true;
   }
@@ -3573,7 +3618,7 @@ function profileMove(e: PointerEvent, pressed: number): boolean {
   const [px, py] = [e.clientX - r.left, e.clientY - r.top];
   const d = profileDraft;
   if (d && d.id !== -2 && (d.id === e.pointerId || (d.id === -1 && pressed === 0))) {
-    [d.x, d.y] = e.shiftKey ? snapAngle(d.x0, d.y0, px, py) : [px, py];
+    [d.x, d.y] = e.shiftKey && cfg.ndim > 1 ? snapAngle(d.x0, d.y0, px, py) : [px, py];
     // Alt in the volume view: the end on the gas under the pointer, read one at a time.
     d.alt = null;
     if (e.altKey && !flatView() && !profilePicking) {
@@ -3592,9 +3637,9 @@ function profileMove(e: PointerEvent, pressed: number): boolean {
   const g = profileGrab;
   const l = g ? profiles[g.line] : undefined;
   if (g && l && g.id === e.pointerId) {
-    const [x, y] = e.shiftKey ? snapFrom(l, g.end, px, py) : [px, py];
+    const [x, y] = e.shiftKey && cfg.ndim > 1 ? snapFrom(l, g.end, px, py) : [px, py];
     const p = profilePoint(x, y, g.depth);
-    const c = clipSegment(g.end ? l.a : p, g.end ? p : l.b, cfg.ndim);
+    const c = clipSegment(...lockedLine(g.end ? l.a : p, g.end ? p : l.b, g.end), cfg.ndim);
     if (c) {
       l.a = c[0];
       l.b = c[1];
@@ -3618,8 +3663,8 @@ function profileRelease(e: PointerEvent) {
   if (d && d.id === e.pointerId) {
     if (e.type !== 'pointerup') profileDraft = null;
     // A press let go where it began, or soon after it came, is a click: the end is placed with
-    // the next one.
-    else if (Math.hypot(d.x - d.x0, d.y - d.y0) < 5 || performance.now() - d.t0 < PROFILE_CLICK_MS) d.id = -1;
+    // the next one. (A radial line needs one point, its outer end: a click places it.)
+    else if (!radialProfiles(cfg) && (Math.hypot(d.x - d.x0, d.y - d.y0) < 5 || performance.now() - d.t0 < PROFILE_CLICK_MS)) d.id = -1;
     else finishDraft();
     drawProfileLine();
   }
@@ -3640,7 +3685,7 @@ function finishDraft() {
   }
   profileDraft = null;
   const b = d.alt ?? profilePoint(d.x, d.y, d.depth);
-  const c = clipSegment(d.a, b, cfg.ndim);
+  const c = clipSegment(...lockedLine(d.a, b), cfg.ndim);
   if (!c) {
     notice('That line does not cross the box');
     drawProfileLine();
@@ -3700,8 +3745,12 @@ function closeProfile() {
  * The lines a link carries (link.ts), set before their run is built: drawn and sampled once it
  * is, the panel opened on its first frame. The field defaults to the one the view shows.
  */
-function setLinkProfiles(lp: LinkProfiles, ndim: 2 | 3) {
-  profiles = lp.lines.slice(0, MAX_PROFILES).map(([a, b], i) => ({ a: [...a] as Vec3, b: [...b] as Vec3, dims: ndim, color: i, data: [] }));
+function setLinkProfiles(lp: LinkProfiles, c: SimConfig) {
+  // (A 1D run's lines made horizontal or radial, as it draws them: lockedLine.)
+  profiles = lp.lines.slice(0, MAX_PROFILES).map(([a, b], i) => {
+    const [la, lb] = lockedLine([...a] as Vec3, [...b] as Vec3, 1, c);
+    return { a: la, b: lb, dims: c.ndim, color: i, data: [] };
+  });
   profileFields = lp.fields?.length ? lp.fields.map((f) => ({ field: f.field, species: f.species ?? 0, log: f.log ?? null })) : [{ field: view.field, species: view.species, log: null }];
   profileRanges = [];
   profileHover = null;
@@ -3799,8 +3848,13 @@ function drawProfileLine() {
     }
     const d = profileDraft;
     if (d) {
-      const A = d.a ? at(d.a) : { x: d.x0, y: d.y0, w: 1 };
-      const B = d.alt ? at(d.alt) : { x: d.x, y: d.y, w: 1 };
+      let A = d.a ? at(d.a) : { x: d.x0, y: d.y0, w: 1 };
+      let B = d.alt ? at(d.alt) : { x: d.x, y: d.y, w: 1 };
+      // A 1D run's line as it will be placed: horizontal, or radial (lockedLine).
+      if (d.a && cfg.ndim === 1) {
+        const [la, lb] = lockedLine(d.a, d.alt ?? profilePoint(d.x, d.y, d.depth));
+        [A, B] = [at(la), at(lb)];
+      }
       const used = new Set(profiles.map((p) => p.color));
       const c = PROFILE_COLORS[Math.max(0, PROFILE_COLORS.findIndex((_, i) => !used.has(i)))];
       if (A.w > 0) html += `<g style="--c:${c}">${seg(A, B)}<circle class="end start" cx="${A.x}" cy="${A.y}" r="4" /><circle class="end" cx="${B.x}" cy="${B.y}" r="4" /></g>`;
@@ -3837,7 +3891,7 @@ function profileLine(a: Vec3, b: Vec3, n?: number): { points: Float32Array<Array
 function encodeFrameProfile(now: number, enc: GPUCommandEncoder, s: Simulation): (() => void) | null {
   if (!profiles.length || building || s !== sim) return null;
   if (profilePop.hidden && !profileOpenPending) return null;
-  if (profiles.some((p) => p.dims !== cfg.ndim) || spherical(cfg)) {
+  if (profiles.some((p) => p.dims !== cfg.ndim) || (spherical(cfg) && cfg.ndim > 1)) {
     closeProfile();
     return null;
   }
@@ -4278,7 +4332,8 @@ function drawProfilePop() {
 async function apiProfile(o: { from?: number[]; to?: number[]; field?: string | number; n?: number; projection?: number | null; show?: boolean | 'add'; line?: number }) {
   const s = sim;
   if (!s) throw new Error('no simulation is loaded');
-  if (spherical(cfg)) throw new Error('profiles are not available on a spherical grid yet');
+  // (A 1D spherical run's profiles are radial, sampled along r alone: plans/one-dimensional.md.)
+  if (spherical(cfg) && cfg.ndim > 1) throw new Error('profiles are not available on a spherical grid yet');
   let a: Vec3;
   let b: Vec3;
   const onShow = o.from === undefined && o.to === undefined;
@@ -4296,7 +4351,8 @@ async function apiProfile(o: { from?: number[]; to?: number[]; field?: string | 
       }
       return v;
     };
-    const c = clipSegment(point(o.from, 'from'), point(o.to, 'to'), cfg.ndim);
+    // A 1D run's line made horizontal, or radial from the center (lockedLine).
+    const c = clipSegment(...lockedLine(point(o.from, 'from') as Vec3, point(o.to, 'to') as Vec3), cfg.ndim);
     if (!c) throw new Error('profile: that line does not cross the box');
     [a, b] = c;
   }
@@ -4454,13 +4510,13 @@ async function boxPointAt(px: number, py: number): Promise<Vec3 | null> {
     depth = t / Math.hypot(1, ux * (w / h) * f.tan, uy * f.tan);
   }
   const f = locate(px, py, depth).pos;
-  if (cfg.ndim === 2) f[2] = 0;
+  if (cfg.ndim < 3) f[2] = 0;
   return f.some((v) => v < 0 || v >= 1) ? null : f;
 }
 
 /** The cell of the gas at a point of the box (in fractions of it), or null outside the box. */
 async function probeAt(s: Simulation, f: number[], stencil = false): Promise<CellProbe | null> {
-  const g = [f[0], f[1], cfg.ndim === 2 ? 0 : f[2]] as [number, number, number];
+  const g = [f[0], f[1], cfg.ndim < 3 ? 0 : f[2]] as [number, number, number];
   return g.some((v) => !(v >= 0 && v < 1)) ? null : s.probe(g, { stencil });
 }
 
@@ -4774,7 +4830,7 @@ function sourceWeight(q: SourceSpec, pos: number[]): { w: number; vel: number[] 
     vel = m.vel;
   }
   const d = [0, 1, 2].map((a) => {
-    if (a === 2 && cfg.ndim === 2) return 0;
+    if (a === 2 && cfg.ndim < 3) return 0;
     let v = boxFrac(cfg, pos[a], a) - at[a];
     if (cfg.bcLo[a] === 0) v -= Math.round(v);
     return v;
@@ -4791,7 +4847,7 @@ function massSinkRate(pos: number[]): number {
   let k = 0;
   for (const m of massesNow()) {
     if (!(m.sinkRadius > 0 && m.sinkRate > 0)) continue;
-    const d = [0, 1, 2].map((a) => (a === 2 && cfg.ndim === 2 ? 0 : pos[a] - m.pos[a]));
+    const d = [0, 1, 2].map((a) => (a === 2 && cfg.ndim < 3 ? 0 : pos[a] - m.pos[a]));
     const q = (d[0] ** 2 + d[1] ** 2 + d[2] ** 2) / m.sinkRadius ** 2;
     if (q >= 1) continue;
     // The rate is in units of sqrt(G M / r_sink^3), per unit time for a massless particle.
@@ -4883,7 +4939,7 @@ async function runContourHover() {
     let a = view.cx + (q.x - r.left - canvas.clientWidth / 2 + sliceShift()) / span;
     let b = view.cy - (q.y - r.top - canvas.clientHeight / 2) / span;
     // A spherical run's slice: the point of the (r, theta) map under the (R, z) one.
-    if (spherical(cfg)) [a, b] = sphFromView(cfg, a, b) ?? [-1, -1];
+    if (curvedView(cfg)) [a, b] = sphFromView(cfg, a, b) ?? [-1, -1];
     const hit = a >= 0 && a < 1 && b >= 0 && b < 1 ? await renderer.contourAt(a, b, view, span) : null;
     if (contourPoint !== q || !contoursHoverable()) return;
     contourKey = key;
@@ -4946,7 +5002,7 @@ function outlineMatrix(): number[] {
   let ry: number[];
   let rw: number[];
   if (flatView()) {
-    const axis = cfg.ndim === 2 ? 2 : view.sliceAxis;
+    const axis = cfg.ndim < 3 ? 2 : view.sliceAxis;
     const [ia, ib] = axis === 0 ? [1, 2] : axis === 1 ? [0, 2] : [0, 1];
     const k = sliceSpan() * view.zoom;
     rx = [0, 0, 0, w / 2 - sliceShift() - view.cx * k];
@@ -5029,7 +5085,7 @@ function clearSources() {
 function projector(): (p: number[]) => { x: number; y: number; w: number } {
   const m = outlineMatrix();
   // A spherical run's slice draws (r, theta) at (R, z) (sphToView).
-  const sph = flatView() && spherical(cfg);
+  const sph = flatView() && curvedView(cfg);
   return (q) => {
     const p = sph ? [...sphToView(cfg, q[0], q[1]), q[2]] : q;
     const w = m[3] * p[0] + m[7] * p[1] + m[11] * p[2] + m[15];
@@ -5289,7 +5345,7 @@ function massSpec(pos: Vec3, vel: Vec3, q: { size: number; amount: number; mass:
   const box = cfg.problem.box;
   // The gas in the box sets the scale; with no readback yet, a box of unit density does.
   const gas = lastDiag?.mass ?? box ** cfg.ndim;
-  const two = cfg.ndim === 2;
+  const two = cfg.ndim < 3;
   // A preset without a gravitational constant gets G = 1 when a point mass is placed.
   const G = cfg.G > 0 ? cfg.G : 1;
   const where = {
@@ -5324,7 +5380,7 @@ function starSpec(pos: Vec3, vel: Vec3): PointMass {
 function carrierSpec(pos: Vec3, vel: Vec3, size: number): PointMass {
   const box = cfg.problem.box;
   const gas = lastDiag?.mass ?? box ** cfg.ndim;
-  const two = cfg.ndim === 2;
+  const two = cfg.ndim < 3;
   return {
     gm: 1e-9 * (cfg.G > 0 ? cfg.G : 1) * gas,
     pos: pos.map((v, i) => (two && i === 2 ? 0 : fracPos(cfg, v, i))),
@@ -5598,7 +5654,7 @@ async function toolApi(name: string, o: Record<string, unknown> = {}): Promise<R
     case 'obstacle': {
       known(['shape', 'center', 'half', 'points', 'axis', 'erase']);
       if (cfg.problem.mhd) throw new Error('obstacle: obstacles are not available with a magnetic field yet');
-      const axis = cfg.ndim === 2 ? 2 : scalar('axis', 2, 0, 2);
+      const axis = cfg.ndim < 3 ? 2 : scalar('axis', 2, 0, 2);
       if (!Number.isInteger(axis)) throw new Error('obstacle: "axis" is 0, 1 or 2');
       const pair = (k: string): [number, number] => {
         const v = o[k];
@@ -5627,7 +5683,7 @@ async function toolApi(name: string, o: Record<string, unknown> = {}): Promise<R
     case 'pull': {
       known(['from', 'to', 'radius', 'softness', 'grip']);
       magnetic();
-      const ops = pullOps(point('from'), point('to'), { radius: scalar('radius', 0.1, 0.001, 1), softness: scalar('softness', 0.7, 0, 1), grip: scalar('grip', 0.5, 0.01, 0.9) }, cfg.n, cfg.ndim === 2);
+      const ops = pullOps(point('from'), point('to'), { radius: scalar('radius', 0.1, 0.001, 1), softness: scalar('softness', 0.7, 0, 1), grip: scalar('grip', 0.5, 0.01, 0.9) }, cfg.n, cfg.ndim < 3);
       for (const op of ops) brushNow(op);
       out.frames = ops.length;
       break;
@@ -5884,7 +5940,7 @@ function advanceStroke(now: number) {
     // The field is carried after the pointer, a frame's worth at a time (ui/session.ts pullStep).
     const to = locate(s.x, s.y, s.depth).pos;
     const from = (s.pulled ??= locate(s.x0, s.y0, s.depth).pos);
-    const step = pullStep(from, to, { radius: q.size, softness: q.softness, grip: q.amount }, cfg.n, cfg.ndim === 2);
+    const step = pullStep(from, to, { radius: q.size, softness: q.softness, grip: q.amount }, cfg.n, cfg.ndim < 3);
     if (s.released && step.done) stroke = null;
     if (!step.op) return;
     pendingBrush = step.op;
@@ -6180,7 +6236,7 @@ function colTitle(c: number): string {
   const title =
     field !== 4
       ? DIAG_COLS[c].title
-      : cfg.ndim === 2
+      : cfg.ndim < 3
         ? 'Angular momentum the accreted gas brought in, about the sink in its rest frame (z; positive is counterclockwise)'
         : 'Angular momentum the accreted gas brought in, about the sink in its rest frame (magnitude)';
   return `Sink ${i + 1}: ${title}`;
@@ -6203,7 +6259,7 @@ function sinkValues(d: Diagnostics): number[] {
     } else if (prev && d.t === prev.t) rates = prev.rates; // paused: the readout repeats
     sinkPrev[i] = { t: d.t, acc: m.accreted, p, l, rates };
     const mass = m.massless ? 0 : cfg.G > 0 ? m.gm / cfg.G : NaN;
-    const lShown = cfg.ndim === 2 ? l[2] : norm(l);
+    const lShown = cfg.ndim < 3 ? l[2] : norm(l);
     out.push(mass, rates[0], m.accreted, norm(p), lShown, ...p, ...l, ...rates.slice(1), ...m.pos, ...m.vel);
   });
   return out;
@@ -6219,7 +6275,7 @@ function bodyValues(d: Diagnostics): number[] {
       continue;
     }
     const k = b.coefficients;
-    out.push(k?.drag ?? NaN, k?.lift ?? NaN, k?.power ?? NaN, ...b.force, cfg.ndim === 2 ? b.torque[2] : norm(b.torque), ...b.viscous, ...b.torque);
+    out.push(k?.drag ?? NaN, k?.lift ?? NaN, k?.power ?? NaN, ...b.force, cfg.ndim < 3 ? b.torque[2] : norm(b.torque), ...b.viscous, ...b.torque);
   }
   return out;
 }
@@ -6784,7 +6840,7 @@ function tick(now: number) {
  */
 function statusLine(s: Simulation, live: boolean): string {
   const u = units();
-  const parts = [`${cfg.n}${cfg.ndim === 2 ? '²' : '³'}`];
+  const parts = [gridLabel(cfg.n, cfg.ndim)];
   if (live) parts.push(`${fps.toFixed(0)} fps`);
   if (lastDiag) parts.push(`t = ${u.fmt(lastDiag.t, 'time')}`);
   // Comoving coordinates: where the expansion is.
@@ -6888,7 +6944,7 @@ const api = installApi(
       return b;
     },
     background: () => backgroundCss(view.light),
-    resolutions: () => ({ 2: RES_2D, 3: RES_3D, uniformMax: { 2: uniformMax(2), 3: uniformMax(3) } }),
+    resolutions: () => ({ 1: RES_1D, 2: RES_2D, 3: RES_3D, uniformMax: { 1: uniformMax(1), 2: uniformMax(2), 3: uniformMax(3) } }),
     idle,
     build: (link) => build(link.problem, link.n, link.ndim, link.amr, false, link),
     importAthdf,
@@ -7023,12 +7079,13 @@ const api = installApi(
         log: view.log && !LINEAR_FIELDS.has(view.field),
         title: unit ? `${name} (${unit})` : name,
         mode: cfg.ndim === 3 && view.mode === 'volume' ? 'volume' : 'plane',
-        sliceAxis: cfg.ndim === 2 ? 2 : view.sliceAxis,
+        sliceAxis: cfg.ndim < 3 ? 2 : view.sliceAxis,
         right,
         up,
-        twoD: cfg.ndim === 2,
+        twoD: cfg.ndim < 3,
         light: view.light,
         status: sim ? statusLine(sim, false) : '',
+        oneD: oneDChip(cfg)?.text,
       };
     },
     setRecording(size) {

@@ -8,7 +8,7 @@ const eos = makeEos('ideal', { ...defaultEosParams(), gamma: 5 / 3 });
 const DX = 0.1;
 
 /** A stencil of the cells around the origin, from the primitive fields at each cell center. */
-function stencil(rho: (x: number[]) => number, v: (x: number[]) => number[], p: (x: number[]) => number, ndim: 2 | 3 = 3, missing: number[] = []): CellStencil {
+function stencil(rho: (x: number[]) => number, v: (x: number[]) => number[], p: (x: number[]) => number, ndim: 1 | 2 | 3 = 3, missing: number[] = []): CellStencil {
   const s: CellStencil = { u1: new Array(27).fill(null), u2: new Array(27).fill(null), g: [0, 0, 0] };
   for (let k = -1; k <= 1; k++) {
     for (let j = -1; j <= 1; j++) {

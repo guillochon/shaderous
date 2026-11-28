@@ -115,7 +115,9 @@ export class Multigrid {
       device.queue.writeBuffer(buf, 0, data);
       return buf;
     };
-    for (let l = 0, m = n, dl: [number, number, number] = [...dims0]; shortest(dl) >= 2; l++, m >>= 1, dl = [dl[0] >> 1, dl[1] >> 1, flat ? 1 : dl[2] >> 1]) {
+    // (The finest level always: a 1D spherical run, one cell in theta, solves nothing here, but
+    // its monopole writes this level's potential: plans/one-dimensional.md.)
+    for (let l = 0, m = n, dl: [number, number, number] = [...dims0]; l === 0 || shortest(dl) >= 2; l++, m >>= 1, dl = [dl[0] >> 1, dl[1] >> 1, flat ? 1 : dl[2] >> 1]) {
       const h = box / m;
       const uni = [0, 1].map((color) => uniform(dl, m, color, l, h));
       const phi = tex3d(device, dl[0], 'r32float', `phi L${l}`, dl[2], dl[1]);

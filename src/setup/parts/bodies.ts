@@ -362,7 +362,7 @@ export interface BodyContext {
   G: number;
   /** cell size the masses sit in, and the grid's dimensions */
   dx: number;
-  ndim: 2 | 3;
+  ndim: 1 | 2 | 3;
   box: number;
   eos?: Eos;
 }

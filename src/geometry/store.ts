@@ -86,7 +86,7 @@ function meshOf(file: string, node?: string): Mesh {
 }
 
 /** The turn that takes the file's up axis to the box's (z in 3D, y in 2D). */
-function upMatrix(up: 'x' | 'y' | 'z', ndim: 2 | 3): Mat4 {
+function upMatrix(up: 'x' | 'y' | 'z', ndim: 1 | 2 | 3): Mat4 {
   const m = new Float64Array(16);
   m[15] = 1;
   // Columns are where the file's x, y, z go.
@@ -159,7 +159,7 @@ export interface PlacedMesh {
  * and its bounding box's middle at `center`. Its distance field is made at the finest cell
  * size (`dx`), in the file's frame, and kept for later runs at the same spacing.
  */
-export function placeMesh(shape: MeshShape, ctx: { box: number; ndim: 2 | 3; dx: number }): PlacedMesh {
+export function placeMesh(shape: MeshShape, ctx: { box: number; ndim: 1 | 2 | 3; dx: number }): PlacedMesh {
   if (isOutlineFile(shape.file)) return placeOutline(shape, ctx);
   const { mesh, toBox, scale: s, center } = placement(shape, ctx);
   const toFile = invert(toBox);
@@ -174,7 +174,7 @@ export function placeMesh(shape: MeshShape, ctx: { box: number; ndim: 2 | 3; dx:
 }
 
 /** Where a mesh shape's file goes in the box: its triangles, the matrix, the scale and the center. */
-function placement(shape: MeshShape, ctx: { box: number; ndim: 2 | 3 }): { mesh: Mesh; toBox: Mat4; scale: number; center: Vec3 } {
+function placement(shape: MeshShape, ctx: { box: number; ndim: 1 | 2 | 3 }): { mesh: Mesh; toBox: Mat4; scale: number; center: Vec3 } {
   const mesh = meshOf(shape.file, shape.node);
   const U = upMatrix(shape.up ?? 'z', ctx.ndim);
   const ub = bounds({ ...mesh, positions: transformed(mesh.positions, U) });
@@ -193,7 +193,7 @@ function placement(shape: MeshShape, ctx: { box: number; ndim: 2 | 3 }): { mesh:
  * the setup preview draws its silhouette from (no distance field is made). Null for an outline
  * or a file not loaded.
  */
-export function meshSilhouette(shape: MeshShape, ctx: { box: number; ndim: 2 | 3 }, axes: [number, number], max = 4000): number[][] | null {
+export function meshSilhouette(shape: MeshShape, ctx: { box: number; ndim: 1 | 2 | 3 }, axes: [number, number], max = 4000): number[][] | null {
   if (!hasMeshFile(shape.file) || isOutlineFile(shape.file)) return null;
   try {
     const { mesh, toBox } = placement(shape, ctx);
@@ -210,7 +210,7 @@ export function meshSilhouette(shape: MeshShape, ctx: { box: number; ndim: 2 | 3
   }
 }
 
-function finish(shape: MeshShape, ctx: { box: number; ndim: 2 | 3; dx: number }, mesh: Mesh, toBox: Mat4, toFile: Mat4, s: number, center: Vec3, f: { field: DistanceField; report: MeshReport }): PlacedMesh {
+function finish(shape: MeshShape, ctx: { box: number; ndim: 1 | 2 | 3; dx: number }, mesh: Mesh, toBox: Mat4, toFile: Mat4, s: number, center: Vec3, f: { field: DistanceField; report: MeshReport }): PlacedMesh {
   const h = ctx.dx / s;
   const { field, report } = f;
   const distance = (x: number, y: number, z: number) => {
@@ -244,7 +244,7 @@ function finish(shape: MeshShape, ctx: { box: number; ndim: 2 | 3; dx: number },
  * further apart than `spacing`: each triangle's vertices, edges and inside on a grid of that
  * pitch. What an adaptive mesh's refinement near a body is decided from (setup/parts/surfaces.ts).
  */
-export function meshSurfacePoints(shape: MeshShape, ctx: { box: number; ndim: 2 | 3 }, spacing: number): Float64Array {
+export function meshSurfacePoints(shape: MeshShape, ctx: { box: number; ndim: 1 | 2 | 3 }, spacing: number): Float64Array {
   const { mesh, toBox } = placement(shape, ctx);
   const W = transformed(mesh.positions, toBox);
   const idx = mesh.indices;
@@ -308,7 +308,7 @@ export function shadow(P: Float32Array, idx: Uint32Array, a: number, res: number
  * center. In 3D it is extruded along z over the box's depth unless `scale` sets nothing else;
  * its report's volume is its area.
  */
-function placeOutline(shape: MeshShape, ctx: { box: number; ndim: 2 | 3; dx: number }): PlacedMesh {
+function placeOutline(shape: MeshShape, ctx: { box: number; ndim: 1 | 2 | 3; dx: number }): PlacedMesh {
   const text = new TextDecoder().decode(bytesOf(shape.file));
   const o: Outline = extensionOf(shape.file) === 'svg' ? parseSvgPath(text) : parseAirfoil(text);
   const b = outlineBounds(o);

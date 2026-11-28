@@ -34,7 +34,7 @@ export const gravityColor = (count: number, bsize: number): [number, number, num
  * mesh of more than 16383 leaves made every burn pass invalid, and the run waited for it
  * forever.
  */
-export const burnInterior = (ndim: 2 | 3, count: number): [number, number, number] => {
+export const burnInterior = (ndim: 1 | 2 | 3, count: number): [number, number, number] => {
   if (ndim === 2) {
     const q = Math.ceil(count / 4);
     return [Math.min(q, SLAB_QUADS) * 2, 4, 2 * Math.ceil(q / SLAB_QUADS)];

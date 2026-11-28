@@ -242,7 +242,7 @@ npx -y shaderous sweep --problem sedov --dim 2 --vary n=128,256,512 --until 0.05
 Every flag (`npx -y shaderous --help` says what each takes):
 
 <!-- gen:cli-flag-list -->
-- Setup: `--problem ID`, `--dim 2|3`, `--n CELLS`, `--amr LEVELS`, `--set KEY=VALUE`, `--setup FILE`, `--from FILE`, `--switch-burn`
+- Setup: `--problem ID`, `--dim 1|2|3`, `--n CELLS`, `--amr LEVELS`, `--set KEY=VALUE`, `--setup FILE`, `--from FILE`, `--switch-burn`
 - Stopping: `--until T`, `--steps N`, `--every DT`, `--every-wall SECONDS`, `--timeout SECONDS`, `--wall SECONDS`
 - Outputs: `--out DIR`, `--png`, `--width PX`, `--height PX`, `--overlays`, `--native`, `--view KEY=VALUE`, `--shot NAME:KEY=VALUE,..`, `--slice VAR`, `--slice-axis A`, `--slice-pos P`, `--slice-res R`, `--slice-format F`, `--profile NAME:FROM:TO[:FIELD,..]`, `--profile-n N`, `--profile-format F`, `--athdf`, `--athdf-every N`, `--debris`
 - Movie: `--mp4`, `--frame-dt DT`, `--frame-every N`, `--fps F`, `--bitrate M`, `--no-overlays`

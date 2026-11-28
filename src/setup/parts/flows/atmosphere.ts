@@ -22,7 +22,7 @@ const atmosphere: FlowDef<{ T: number; rho0: number }> = {
     const dx = ctx.box / n;
     // The setup's own downward acceleration, which the atmosphere is in balance with.
     const gext = ctx.spec.physics?.gext;
-    const g = gext === undefined ? 1 : Array.isArray(gext) ? -gext[ndim === 2 ? 1 : 2] : gext.down;
+    const g = gext === undefined ? 1 : Array.isArray(gext) ? -gext[ndim - 1] : gext.down;
     // Cell by cell, the trapezoid rule of the balanced reconstruction for an isothermal gas,
     // T (rho[j+1] - rho[j]) = -g dx (rho[j] + rho[j+1]) / 2: rho[j+1] = rho[j] (1 - a) / (1 + a).
     const a = (g * dx) / (2 * q.T);
@@ -30,14 +30,14 @@ const atmosphere: FlowDef<{ T: number; rho0: number }> = {
     const rho = new Float64Array(n);
     for (let j = 0; j < n; j++) rho[j] = q.rho0 * Math.pow(ratio, j);
     return (_x, y, z) => {
-      const h = (ndim === 2 ? y : z) / ctx.box + 0.5; // height, 0 to 1
+      const h = [_x, y, z][ndim - 1] / ctx.box + 0.5; // height, 0 to 1 (up: x in 1D, y in 2D, z in 3D)
       const j = Math.min(n - 1, Math.max(0, Math.floor(h * n)));
       return { rho: rho[j], vx: 0, vy: 0, vz: 0, p: q.T * rho[j], s: h };
     };
   },
   issues: (ctx) => {
     const gext = ctx.spec.physics?.gext;
-    const g = gext === undefined ? 1 : Array.isArray(gext) ? -gext[ctx.ndim === 2 ? 1 : 2] : gext.down;
+    const g = gext === undefined ? 1 : Array.isArray(gext) ? -gext[ctx.ndim - 1] : gext.down;
     return g <= 0 ? 'the atmosphere needs a uniform acceleration pointing down' : null;
   },
 };

@@ -132,7 +132,7 @@ interface FlowUse {
 const flowsOf = (spec: SetupSpec): FlowUse[] => (spec.parts ?? []).flatMap((p) => (p.kind === 'flow' ? [{ part: p, ...flowValues(p) }] : []));
 
 /** The disks of a setup, built: each about the bodies it names. */
-function disksOf(spec: SetupSpec, bodies: Bodies, G: number, n: number, ndim: 2 | 3): BuiltDisk[] {
+function disksOf(spec: SetupSpec, bodies: Bodies, G: number, n: number, ndim: 1 | 2 | 3): BuiltDisk[] {
   const box = boxOf(spec);
   const dx = n > 0 ? box / n : 0;
   return (spec.parts ?? []).flatMap((p) => {
@@ -182,7 +182,7 @@ function ambient(spec: SetupSpec, bodies: Bodies) {
 }
 
 /** The initial state of a setup on a grid of n cells a side. */
-function initOf(spec: SetupSpec, n: number, eos: Eos, ndim: 2 | 3, levels = 0): InitFn {
+function initOf(spec: SetupSpec, n: number, eos: Eos, ndim: 1 | 2 | 3, levels = 0): InitFn {
   const { units, G } = scales(spec);
   const box = boxOf(spec);
   const species = speciesOf(spec);
@@ -238,7 +238,7 @@ function initOf(spec: SetupSpec, n: number, eos: Eos, ndim: 2 | 3, levels = 0): 
     // the surface's temperature, at the density the shares give (the law the vapor over it
     // follows too), so its pressure comes from (rho, T) and needs no solving for.
     const dxf = box / (n * 2 ** levels);
-    const sub = ndim === 2 ? 1 : PLANET_EDGE_SUB;
+    const sub = ndim < 3 ? 1 : PLANET_EDGE_SUB;
     const o = (q: number) => ((q + 0.5) / PLANET_EDGE_SUB - 0.5) * dxf;
     const planetEdge = (st: (typeof stars)[number], x: number, y: number, z: number, r: number): { rho: number; xb: number } | null => {
       if (Math.abs(r - st.R) > dxf) return null;
@@ -249,7 +249,7 @@ function initOf(spec: SetupSpec, n: number, eos: Eos, ndim: 2 | 3, levels = 0): 
       for (let c = 0; c < sub; c++)
         for (let b = 0; b < PLANET_EDGE_SUB; b++)
           for (let a = 0; a < PLANET_EDGE_SUB; a++) {
-            const rr = Math.hypot(x + o(a) - cx, y + o(b) - cy, ndim === 2 ? 0 : z + o(c) - cz);
+            const rr = Math.hypot(x + o(a) - cx, y + o(b) - cy, ndim < 3 ? 0 : z + o(c) - cz);
             if (rr >= st.R) continue;
             const g = st.planet!.at(rr);
             inside++;
@@ -373,7 +373,7 @@ function settlingOfSetup(spec: SetupSpec, eos: Eos): Settling {
 }
 
 /** The initial magnetic field's sources: potentials (stars, disk loops, flows) and face values (uniform fields, flows). */
-function fieldOf(spec: SetupSpec, ndim: 2 | 3): { potential: PotentialFn | null; face: FaceFn | null } {
+function fieldOf(spec: SetupSpec, ndim: 1 | 2 | 3): { potential: PotentialFn | null; face: FaceFn | null } {
   const { units, G } = scales(spec);
   const box = boxOf(spec);
   const needsEos = hasWhiteDwarf(spec);
@@ -405,7 +405,7 @@ function fieldOf(spec: SetupSpec, ndim: 2 | 3): { potential: PotentialFn | null;
   for (const p of spec.parts ?? []) {
     if (p.kind !== 'field') continue;
     const b = p.b ?? [0, 0, 0];
-    const up = ndim === 2 ? 1 : 2;
+    const up = ndim - 1;
     const strength = p.up;
     faces.push(strength !== undefined ? (axis) => (axis === up ? strength : 0) : (axis) => b[axis]);
   }
@@ -507,7 +507,7 @@ export function compileSetup(input: SetupSpec): Compiled {
   const boxFeature = feats.find((f) => featuredPaths(f).includes('domain.box'));
   const burnFlow = flows.find((f) => f.def.burn);
   const heatFlow = flows.find((f) => f.def.heat);
-  const flowCtx = (s: SetupSpec, ndim: 2 | 3): FlowContext => ({ spec: s, box: boxOf(s), ndim, ...scales(s), species: speciesOf(s) });
+  const flowCtx = (s: SetupSpec, ndim: 1 | 2 | 3): FlowContext => ({ spec: s, box: boxOf(s), ndim, ...scales(s), species: speciesOf(s) });
 
   // The damping zone is the first disk's that has one, as the setup opens.
   let damping: Problem['damping'];
@@ -519,13 +519,13 @@ export function compileSetup(input: SetupSpec): Compiled {
   const tunnel = tunnelOf(spec);
   if (tunnel) damping = tunnelDamping(tunnel, boxOf(spec), d.ndim === 3 ? 3 : 2) ?? damping;
   // A flow's own (its exact solution on the open faces); the shader decides where by position.
-  for (const f of flows) if (f.def.damping) damping = f.def.damping(flowCtx(spec, d.ndim === 2 ? 2 : 3), f.values as never) ?? damping;
+  for (const f of flows) if (f.def.damping) damping = f.def.damping(flowCtx(spec, d.ndim ?? 3), f.values as never) ?? damping;
 
   const mhd: MhdSpec | undefined =
     kinds.potential || kinds.face
       ? {
-          ...(kinds.potential ? { potential: (params: Record<string, number>, ndim: 2 | 3) => fieldOf(at(params), ndim).potential! } : {}),
-          ...(kinds.face ? { face: (params: Record<string, number>, ndim: 2 | 3) => fieldOf(at(params), ndim).face! } : {}),
+          ...(kinds.potential ? { potential: (params: Record<string, number>, ndim: 1 | 2 | 3) => fieldOf(at(params), ndim).potential! } : {}),
+          ...(kinds.face ? { face: (params: Record<string, number>, ndim: 1 | 2 | 3) => fieldOf(at(params), ndim).face! } : {}),
         }
       : undefined;
 
@@ -541,14 +541,14 @@ export function compileSetup(input: SetupSpec): Compiled {
     bodies: obstacles.length ? obstacles.map((p, i) => ({ id: p.id ?? `obstacle ${i + 1}`, center: bodyCenter(p.shape) })) : undefined,
     moving: movingOf(obstacles),
     surfaces: obstacles.length
-      ? (n: number, ndim: 2 | 3, lo: readonly number[], params?: Record<string, number>) => {
+      ? (n: number, ndim: 1 | 2 | 3, lo: readonly number[], params?: Record<string, number>) => {
           const s = at(params);
           const obs = (s.parts ?? []).filter((p): p is ObstaclePart => p.kind === 'obstacle');
           return bodySurfaces(obs, { box: boxOf(s), n, ndim, lo, tEnd: s.run?.tEnd ?? Infinity });
         }
       : undefined,
     obstacleDistances: obstacles.length
-      ? (n: number, ndim: 2 | 3, params?: Record<string, number>) => {
+      ? (n: number, ndim: 1 | 2 | 3, params?: Record<string, number>) => {
           const s = at(params);
           return obstacleDistances((s.parts ?? []).filter((p): p is ObstaclePart => p.kind === 'obstacle'), { box: boxOf(s), n, ndim });
         }
@@ -556,7 +556,7 @@ export function compileSetup(input: SetupSpec): Compiled {
     // A tunnel's force coefficients: over the stream's dynamic pressure and the first obstacle's
     // shadow, with the featured values in force (a wind's speed, a rotor's).
     forceRef: tunnel
-      ? (ndim: 2 | 3, n: number, params?: Record<string, number>) => {
+      ? (ndim: 1 | 2 | 3, n: number, params?: Record<string, number>) => {
           const s = at(params);
           const t = tunnelOf(s) ?? tunnel;
           const obs = (s.parts ?? []).filter((p): p is ObstaclePart => p.kind === 'obstacle');
@@ -577,6 +577,7 @@ export function compileSetup(input: SetupSpec): Compiled {
     jeansFloor: ph.jeansFloor,
     jeansCells: ph.jeansCells,
     supports2d: d.supports2d,
+    supports1d: d.supports1d,
     symmetry: d.symmetric ? { axes: mirrorAxes(d.symmetric), mhd: d.symmetricField ?? false } : undefined,
     geometry: d.geometry === 'cylindrical' || d.geometry === 'spherical' ? d.geometry : undefined,
     sphere: d.geometry === 'spherical' ? { rMin: d.rMin ?? 0.01, log: d.logR ?? false } : undefined,
@@ -642,7 +643,7 @@ export function compileSetup(input: SetupSpec): Compiled {
     conductivity: ph.conductivity,
     resistivity: ph.resistivity,
     driving: ph.driving ? { ...ph.driving } : undefined,
-    gext: gext === undefined ? undefined : Array.isArray(gext) ? () => [...gext] as [number, number, number] : (ndim) => (ndim === 2 ? [0, -gext.down, 0] : [0, 0, -gext.down]),
+    gext: gext === undefined ? undefined : Array.isArray(gext) ? () => [...gext] as [number, number, number] : (ndim) => [0, 1, 2].map((a) => (a === ndim - 1 ? -gext.down : 0)) as [number, number, number],
     settle: hasStars ? (params, eos) => settlingOfSetup(at(params), eos) : undefined,
     heat: heatFlow
       ? (params, eos) => {

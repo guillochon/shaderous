@@ -31,7 +31,7 @@ const WITH_GAS = new Set(['gresho.mach', 'taylor-green.mach', 'shear-layers.mach
 function fingerprint(spec: SetupSpec): string {
   const { problem } = compileSetup(spec);
   const out: unknown[] = [];
-  for (const ndim of (problem.supports2d ? [2, 3] : [3]) as (2 | 3)[]) {
+  for (const ndim of (problem.supports2d ? [2, 3] : [3]) as (1 | 2 | 3)[]) {
     const cfg = configFor(problem, 32, { ndim });
     const eos = makeEos(cfg.eos, cfg.eosParams);
     const at = problem.init(32, eos, ndim, cfg.params);

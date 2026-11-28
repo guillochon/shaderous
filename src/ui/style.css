@@ -288,6 +288,15 @@ details[open] > summary .sum { display: none; }
   white-space: nowrap; overflow: hidden; contain: strict;
   color: var(--dim); text-shadow: 0 0 3px #000; pointer-events: none; font-variant-numeric: tabular-nums;
 }
+/* Under the status line: a 1D run says so (plans/one-dimensional.md), as screenshots and movies do (render/overlays.ts paintChip). */
+#oned-chip {
+  position: absolute; left: 12px; top: 32px; z-index: 2; pointer-events: auto; cursor: help;
+  padding: 2px 8px; border: 1px solid #5d8fd6; border-radius: 10px; background: rgba(12, 28, 52, 0.85);
+  color: #cfe2ff; font-size: 12px; line-height: 16px; white-space: nowrap;
+}
+#oned-chip b { color: #fff; margin-right: 2px; }
+#oned-chip[hidden] { display: none; }
+#oned-chip:not([hidden]) ~ #mem-warn { top: 58px; }
 /* Under the status line: the GPU memory budget lowered after a crash (showMemory in app.ts). */
 #mem-warn {
   position: absolute; left: 12px; top: 32px; max-width: min(960px, calc(100% - 110px)); z-index: 2;
@@ -558,6 +567,8 @@ body.validate .buttons-cell button + button { margin-left: 4px; }
   /* Readouts over the simulation: narrower, and the status line may wrap to two lines. */
   #hud { left: 10px; top: 8px; width: calc(100% - 84px); height: 34px; line-height: 17px; white-space: normal; font-size: 12px; }
   #mem-warn { left: 10px; top: 46px; max-width: calc(100% - 84px); }
+  #oned-chip { left: 10px; top: 46px; }
+  #oned-chip:not([hidden]) ~ #mem-warn { top: 72px; }
   /* The rail scrolls when it is taller than the stage, and can be put away. */
   #rail {
     right: 8px; top: 8px; max-height: calc(100% - 16px); gap: 10px;

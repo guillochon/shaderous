@@ -23,7 +23,7 @@ function mirrored(p: Problem, scale = 1): Problem {
 }
 
 /** Largest relative difference between an octant's (quadrant's) cells and the same cells of the whole. */
-function compareCells(part: Float32Array, whole: Float32Array, n: number, ndim: 2 | 3, stride: number, channel: number): number {
+function compareCells(part: Float32Array, whole: Float32Array, n: number, ndim: 1 | 2 | 3, stride: number, channel: number): number {
   const N = 2 * n;
   const nz = ndim === 3 ? n : 1;
   const NZ = ndim === 3 ? N : 1;

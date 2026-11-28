@@ -62,7 +62,7 @@ const thermalInstability: FlowDef<{ n0: number; amp: number; kMax: number; seed:
     const kMax = Math.round(params.kMax);
     const waves: number[][] = [];
     while (waves.length < TI.modes) {
-      const k = [0, 1, 2].map((a) => (a === 2 && ndim === 2 ? 0 : Math.round((2 * rand() - 1) * kMax)));
+      const k = [0, 1, 2].map((a) => (a >= ndim ? 0 : Math.round((2 * rand() - 1) * kMax)));
       const k2 = k[0] * k[0] + k[1] * k[1] + k[2] * k[2];
       if (k2 === 0 || k2 > kMax * kMax) continue;
       waves.push([...k.map((q) => 2 * Math.PI * q), 2 * Math.PI * rand()]);

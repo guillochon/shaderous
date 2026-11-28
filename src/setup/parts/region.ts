@@ -7,7 +7,7 @@ import { placeMesh } from '../../geometry/store';
 export interface PaintContext {
   box: number;
   n: number;
-  ndim: 2 | 3;
+  ndim: 1 | 2 | 3;
   eos: Eos;
   /** mass fractions in the run's species order, from fractions by name */
   fractions(X: Record<string, number>): number[];
@@ -65,7 +65,7 @@ export function boxFrame(shape: Extract<Shape, { type: 'box' }>, flat = false): 
   };
 }
 
-export function insideOf(shape: Shape, ctx: { box: number; n: number; ndim: 2 | 3 }): { inside: Inside; center: Vec3; radius: number } {
+export function insideOf(shape: Shape, ctx: { box: number; n: number; ndim: 1 | 2 | 3 }): { inside: Inside; center: Vec3; radius: number } {
   if (shape.type === 'sphere') {
     const c = shape.center ?? [0, 0, 0];
     const r = shape.radiusCells !== undefined ? shape.radiusCells * (ctx.box / ctx.n) : (shape.radius ?? 0.1 * ctx.box);
@@ -122,7 +122,7 @@ export function bodyCenter(shape: Shape): Vec3 {
  * area of its drag. A sphere's is exact; a mesh's from its triangles (geometry/store.ts) in 3D;
  * anything else is counted on a grid of samples (half a cell in 2D, the box over 128 in 3D).
  */
-export function shadowOf(shape: Shape, axis: number, ctx: { box: number; n: number; ndim: 2 | 3 }): number {
+export function shadowOf(shape: Shape, axis: number, ctx: { box: number; n: number; ndim: 1 | 2 | 3 }): number {
   if (shape.type === 'sphere') {
     const r = shape.radiusCells !== undefined ? shape.radiusCells * (ctx.box / ctx.n) : (shape.radius ?? 0.1 * ctx.box);
     return ctx.ndim === 2 ? 2 * r : Math.PI * r * r;
@@ -169,7 +169,7 @@ export function shadowOf(shape: Shape, axis: number, ctx: { box: number; n: numb
  * How far a shape reaches from the axis `axis` through the box's center: a rotor's radius. A
  * sphere's and a box's from their geometry (a box's corners), a mesh's from its placed bounds.
  */
-export function reachOf(shape: Shape, axis: number, ctx: { box: number; n: number; ndim: 2 | 3 }): number | undefined {
+export function reachOf(shape: Shape, axis: number, ctx: { box: number; n: number; ndim: 1 | 2 | 3 }): number | undefined {
   const [u, v] = [(axis + 1) % 3, (axis + 2) % 3];
   if (shape.type === 'sphere') {
     const r = shape.radiusCells !== undefined ? shape.radiusCells * (ctx.box / ctx.n) : (shape.radius ?? 0.1 * ctx.box);

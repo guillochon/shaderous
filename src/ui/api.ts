@@ -50,7 +50,7 @@ export interface AppHooks {
   view: ViewState;
   canvas: HTMLCanvasElement;
   /** Grid sizes on offer; above uniformMax a grid must be adaptive (`amr` of 1 or more). */
-  resolutions(): { 2: number[]; 3: number[]; uniformMax: { 2: number; 3: number } };
+  resolutions(): { 1: number[]; 2: number[]; 3: number[]; uniformMax: { 1: number; 2: number; 3: number } };
   /** Resolves once every queued rebuild has finished. */
   idle(): Promise<void>;
   build(link: LinkOverrides): Promise<void>;
@@ -801,7 +801,8 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
         const h = frame ? frame.height : canvas.height;
         if (layout === 'beside') return composeBeside(canvas, w, h, app.overlayInfo(), ov, app.background()).canvas;
         const out = copyOf(canvas, w, h);
-        if (any) paintOverlays(out.getContext('2d')!, w, h, app.overlayInfo(), ov);
+        const info = app.overlayInfo();
+        if (any || info.oneD) paintOverlays(out.getContext('2d')!, w, h, info, ov);
         return out;
       }, d);
       const f = frame as NativeFrame | null;
@@ -1199,6 +1200,7 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
             variant,
             blurb: p.blurb,
             supports2d: !!p.supports2d,
+            supports1d: !!p.supports1d,
             debris: !!p.debris,
             grid: p.grid ?? null,
             tEnd: Number.isFinite(p.tEnd) ? p.tEnd : null,
@@ -1510,7 +1512,7 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
         if (encoding !== 'json' && encoding !== 'base64') throw new Error(`unknown encoding "${encoding}": use json or base64`);
         const { snap, sampler, species } = await sampled();
         const variable = opts.variable ?? 'rho';
-        const axis = snap.ndim === 2 ? 2 : (opts.axis ?? 2);
+        const axis = snap.ndim < 3 ? 2 : (opts.axis ?? 2);
         const pos = opts.pos ?? 0.5;
         const res = Math.max(2, Math.min(2048, Math.round(opts.res ?? Math.min(256, app.cfg().n))));
         const value = variableOf(snap, sampler, species, variable, app.cfg());

@@ -24,7 +24,7 @@ fn g_self(c: vec3<i32>) -> vec3<f32> {
 // periodic potentials wrap, isolated ones are extrapolated linearly (consistent with the
 // one-sided gradient), and beyond a plane of mirror symmetry the cell's image is taken.
 fn phi_self(q0: vec3<i32>) -> f32 {
-  let n = select(vec3<i32>(i32(P.n)), grid_n(), P.dims.w == 1u);
+  let n = select(vec3<i32>(i32(P.n)), grid_n(), P.dims.w == 1u || P.dims.y == 1u);
   if (P.grav_bc == 0u) {
     return textureLoad(G, (q0 + n) % n, 0).w;
   }

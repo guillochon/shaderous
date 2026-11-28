@@ -42,8 +42,10 @@ export function settingValue(cfg: SimConfig, s: Setting): unknown {
 export function setSetting(cfg: SimConfig, s: Setting, value: unknown): void {
   if (s.cfg === 'bc') {
     const bc = value as { lo: number[]; hi: number[] };
-    cfg.bcLo = [bc.lo[0], bc.lo[1], cfg.ndim === 2 ? 0 : bc.lo[2]];
-    cfg.bcHi = [bc.hi[0], bc.hi[1], cfg.ndim === 2 ? 0 : bc.hi[2]];
+    // (The faces a run does not resolve stay periodic, but a spherical run's poles: configFor.)
+    const keepY = cfg.ndim > 1 || cfg.problem.geometry === 'spherical';
+    cfg.bcLo = [bc.lo[0], keepY ? bc.lo[1] : 0, cfg.ndim < 3 ? 0 : bc.lo[2]];
+    cfg.bcHi = [bc.hi[0], keepY ? bc.hi[1] : 0, cfg.ndim < 3 ? 0 : bc.hi[2]];
   } else if (s.cfg === 'symmetry') {
     // The mirrors the problem allows, their planes' faces reflecting.
     Object.assign(cfg, withSymmetry(cfg, mirrorAxes(value as string)));

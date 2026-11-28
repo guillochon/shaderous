@@ -63,7 +63,7 @@ export function mirrorName(axes: readonly boolean[] | undefined): string {
 /** What sets the grid's cells along each axis. */
 export interface GridShape {
   n: number;
-  ndim: 2 | 3;
+  ndim: 1 | 2 | 3;
   symmetry?: readonly boolean[];
   problem: { mhd?: unknown };
   /** levels of the adaptive mesh above its root grid (0 or absent: the uniform grid) */
@@ -77,10 +77,10 @@ const BLOCK = 16;
  * axis has half of them, over [0, box / 2], where some axis in use is not mirrored: a half or a
  * 3D quadrant run then computes its part of the same cube a run without mirrors would, at the
  * same cell size, for half or a quarter of the cost. Where every axis in use is mirrored (an
- * octant, a 2D quadrant) the grid stays a cube of n over [0, box]. One layer along z in 2D.
+ * octant, a 2D quadrant) the grid stays a cube of n over [0, box]. One layer along z in 2D, one cell along y and z in 1D.
  */
 export function gridDims(c: GridShape): [number, number, number] {
-  const axes = c.ndim === 2 ? [0, 1] : [0, 1, 2];
+  const axes = [0, 1, 2].slice(0, c.ndim);
   const s = c.symmetry ?? [false, false, false];
   // (Magnetic fields keep the cube for now: their face passes are sized for one. On blocks a
   // halved axis needs an even number of root blocks.)
@@ -88,11 +88,12 @@ export function gridDims(c: GridShape): [number, number, number] {
   const blocksOk = !c.amrLevels || (Number.isInteger(roots) && roots % 2 === 0);
   const rect = !c.problem.mhd && blocksOk && axes.some((a) => !s[a]);
   const d = [0, 1, 2].map((a) => (rect && s[a] && axes.includes(a) ? c.n / 2 : c.n)) as [number, number, number];
-  if (c.ndim === 2) d[2] = 1;
+  // One layer along z in 2D; one cell along y and z in 1D.
+  for (let a: number = c.ndim; a < 3; a++) d[a] = 1;
   return d;
 }
 /** The grid is rectangular: some mirrored axis is halved (gridDims). */
-export const rectangular = (c: GridShape): boolean => gridDims(c).some((m, a) => m !== (a === 2 && c.ndim === 2 ? 1 : c.n));
+export const rectangular = (c: GridShape): boolean => gridDims(c).some((m, a) => m !== (a >= c.ndim ? 1 : c.n));
 
 /** The domain's upper corner, per axis: the box, or half of it along a halved mirrored axis (gridDims). */
 export function domainHi(c: DomainShape & Partial<GridShape>): [number, number, number] {

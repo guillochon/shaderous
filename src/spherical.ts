@@ -31,7 +31,7 @@ export interface SphGrid {
   shell(i: number): number;
 }
 
-export const spherical = (c: SphereShape): boolean => c.problem.geometry === 'spherical' && c.ndim === 2;
+export const spherical = (c: SphereShape): boolean => c.problem.geometry === 'spherical' && c.ndim < 3;
 
 export function sphGrid(c: SphereShape): SphGrid {
   const n = c.n;
@@ -40,7 +40,8 @@ export function sphGrid(c: SphereShape): SphGrid {
   const log = !!c.problem.sphere?.log;
   const dlog = log ? Math.log(rMax / rMin) / n : 0;
   const dr = c.problem.box / n;
-  const dtheta = Math.PI / n;
+  // (A 1D run's one theta cell spans the sphere: plans/one-dimensional.md.)
+  const dtheta = c.ndim === 1 ? Math.PI : Math.PI / n;
   const rFace = (i: number) => (log ? rMin * Math.exp(i * dlog) : rMin + i * dr);
   const r = (i: number) => (log ? rMin * Math.exp((i + 0.5) * dlog) : rMin + (i + 0.5) * dr);
   const thetaFace = (j: number) => j * dtheta;
@@ -74,8 +75,20 @@ export function sphParams(c: SphereShape): number[] {
  * logarithmic in r on a logarithmic grid). render/slice.wgsl sph_code() is sphFromView().
  */
 
-/** Camera mir.w (render/camera.wgsl): 0, or r_min / r_max of a spherical run, negative if r is logarithmic. */
+/**
+ * The view draws the grid as the half-disk (sphFromView): a spherical run, or a 1D axisymmetric
+ * one, whose R the view repeats around the polar angle as rings (plans/one-dimensional.md). The
+ * latter is the same map with no inner radius (sphGrid's r_min 0, as it has no Problem.sphere).
+ */
+export const curvedView = (c: SphereShape): boolean => spherical(c) || (c.problem.geometry === 'cylindrical' && c.ndim === 1);
+
+/**
+ * Camera mir.w (render/camera.wgsl): 0, or r_min / r_max of a spherical run, negative if r is
+ * logarithmic. A 1D axisymmetric run, whose map has no inner radius, takes a value too small to
+ * matter that is not 0 (0 says the view is not curved).
+ */
 export function sphViewParam(c: SphereShape): number {
+  if (curvedView(c) && !spherical(c)) return 1e-30;
   if (!spherical(c)) return 0;
   const g = sphGrid(c);
   return (g.dlog > 0 ? -1 : 1) * (g.rMin / g.rMax);

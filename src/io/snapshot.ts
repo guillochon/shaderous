@@ -16,7 +16,7 @@ export type Variable = (typeof VARIABLES)[number];
 export const DERIVED_VARIABLES = ['level', 'temp', 'tempK'] as const;
 
 export interface Snapshot {
-  ndim: 2 | 3;
+  ndim: 1 | 2 | 3;
   /** cells along each axis of the root grid, and of every block */
   rootSize: number[];
   blockSize: number[];
@@ -219,7 +219,8 @@ export class SnapshotSampler {
 
   private where(fx: number, fy: number, fz: number) {
     const clamp = (v: number) => Math.min(Math.max(v, 0), 1 - 1e-7);
-    const hit = this.find([clamp(fx), clamp(fy), this.snap.rootSize[2] === 1 ? 0 : clamp(fz)]);
+    // (An axis of one cell, z in 2D and y and z in 1D, is the same at every point along it.)
+    const hit = this.find([clamp(fx), this.snap.rootSize[1] === 1 ? 0 : clamp(fy), this.snap.rootSize[2] === 1 ? 0 : clamp(fz)]);
     if (!hit) throw new Error('the file does not cover the whole domain');
     return hit;
   }

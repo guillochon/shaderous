@@ -13,6 +13,7 @@
     "n": 256,
     "box": 1,
     "supports2d": true,
+    "supports1d": true,
     "geometry": "spherical",
     "rMin": 0.005,
     "bc": {

@@ -135,9 +135,9 @@ export interface PartOption {
 
 const parts = (s: SetupSpec) => s.parts ?? [];
 const count = (s: SetupSpec, f: (p: Part) => boolean) => parts(s).filter(f).length;
-// A 2D run has no z faces: what its document says of them does not count.
+// A 2D run has no z faces, a 1D run no y or z faces: what its document says of them does not count.
 const faces = (s: SetupSpec): number[] => {
-  const k = (s.domain?.ndim ?? 3) === 2 ? 2 : 3;
+  const k = s.domain?.ndim ?? 3;
   return [...(s.domain?.bc?.lo ?? [1, 1, 1]).slice(0, k), ...(s.domain?.bc?.hi ?? [1, 1, 1]).slice(0, k)];
 };
 const flowDef = (p: Part) => (p.kind === 'flow' ? FLOWS[p.name] : undefined);
@@ -148,13 +148,13 @@ const eosKind = (s: SetupSpec): string => {
   return s.physics?.eos ?? 'ideal';
 };
 
-// The uniform field of a setup, by axis: its own (gext) and the Constant field's, down (y in 2D, z in 3D).
+// The uniform field of a setup, by axis: its own (gext) and the Constant field's, down (x in 1D, y in 2D, z in 3D).
 const uniformG = (s: SetupSpec): number[] => {
   const ndim = s.domain?.ndim ?? 3;
   const ge = s.physics?.gext;
   const g = Array.isArray(ge) ? [...ge] : [0, 0, 0];
-  if (ge && !Array.isArray(ge)) g[ndim === 2 ? 1 : 2] -= ge.down;
-  if (s.physics?.gravity === 'constant') g[ndim === 2 ? 1 : 2] -= typeof s.physics.G === 'number' ? s.physics.G : 1;
+  if (ge && !Array.isArray(ge)) g[ndim - 1] -= ge.down;
+  if (s.physics?.gravity === 'constant') g[ndim - 1] -= typeof s.physics.G === 'number' ? s.physics.G : 1;
   return g.slice(0, ndim);
 };
 
@@ -162,6 +162,21 @@ const uniformG = (s: SetupSpec): number[] => {
 export const FACTS: Record<string, { label: string; of: (s: SetupSpec) => Value; say?: (v: Value) => string }> = {
   'domain.ndim': { label: 'Dimensions', of: (s) => s.domain?.ndim ?? 3, say: (v) => `${v}D` },
   'domain.supports2d': { label: 'A setup that makes sense in 2D', of: (s) => s.domain?.supports2d ?? false },
+  'domain.supports1d': { label: 'A setup that makes sense in 1D', of: (s) => s.domain?.supports1d ?? false },
+  // What a 1D run does not take yet, or ever (sim.ts oneDimUnsupported, plans/one-dimensional.md).
+  'oneD.blocked': {
+    label: 'A magnetic field, radiation, species, burning, cooling, viscosity, conduction, driving, a rotating or accelerating frame, comoving coordinates, implicit pressure, the liquid, a shearing box, obstacles, inflows, an orbit, a disk or a wind tunnel',
+    of: (s) => {
+      const ph = s.physics ?? {};
+      const om = ph.rotation?.omega ?? [0, 0, 0];
+      return FACTS.magnetic.of(s) === true || (ph.radiation ?? 'off') !== 'off' || FACTS['species.any'].of(s) === true || !!ph.burn || (ph.cooling ?? 'off') !== 'off' ||
+        (ph.viscosity ?? 0) > 0 || (ph.conductivity ?? 0) > 0 || (ph.resistivity ?? 0) > 0 || (ph.driving?.accel ?? 0) > 0 || om.some((v) => v !== 0) ||
+        (ph.frame ?? 'inertial') !== 'inertial' || !!ph.cosmology || (ph.pressure ?? 'explicit') === 'implicit' || eosKind(s) === 'liquid' || !!ph.shear ||
+        parts(s).some((p) => ['obstacle', 'inflow', 'tunnel', 'orbit', 'disk'].includes(p.kind));
+    },
+  },
+  // A 1D run takes a star or point mass only at a spherical run's center (sim.ts oneDimUnsupported).
+  'parts.starLine': { label: 'A star or a point mass', of: (s) => (count(s, (p) => p.kind === 'star') > 0 || (count(s, (p) => p.kind === 'mass') > 0 && s.domain?.geometry !== 'spherical')) },
   // Space in three dimensions: a 3D grid, or a 2D one in (R, z), whose cells are rings.
   'domain.space3': { label: '3D, or an axisymmetric (R, z) or spherical (r, theta) run', of: (s) => (s.domain?.ndim ?? 3) === 3 || ['cylindrical', 'spherical'].includes(s.domain?.geometry ?? 'cartesian') },
   'gravity.selfFlat': { label: 'Self-gravity', of: (s) => ['periodic', 'isolated'].includes(s.physics?.gravity ?? 'off') && !['cylindrical', 'spherical'].includes(s.domain?.geometry ?? 'cartesian') },
@@ -315,12 +330,12 @@ export const OPTIONS: Option[] = [
   { path: 'view.pitch', label: 'Camera elevation', tip: 'Elevation of the volume view’s camera when the setup opens, in radians', page: 'run', control: num(-1.5, 1.5, { step: 0.05 }), apply: 'live', default: 0.45 },
 
   // ---- domain and grid ----
-  { path: 'domain.ndim', label: 'Dimensions', tip: 'Two or three dimensions. A 2D run is one layer of cells in x and y', page: 'domain', control: pick({ value: 3, label: '3D', excludes: [{ fact: 'domain.geometry', is: ['cylindrical', 'spherical'] }] }, { value: 2, label: '2D', requires: [{ fact: 'domain.supports2d', reason: 'This setup is three-dimensional (its file says it does not make sense in 2D)' }], excludes: [{ fact: 'gravity.selfFlat', reason: 'Not available with self-gravity (but an axisymmetric (R, z) or spherical run has it)' }, { fact: 'parts.starFlat', reason: 'Not available with a star (but an axisymmetric (R, z) run takes one on its axis)' }] }), apply: 'restart', linkKey: 'dim' },
+  { path: 'domain.ndim', label: 'Dimensions', tip: 'One, two or three dimensions. A 2D run is one layer of cells in x and y; a 1D run one row along x (or r, or R), drawn repeated across the axis it does not resolve', page: 'domain', control: pick({ value: 3, label: '3D', excludes: [{ fact: 'domain.geometry', is: ['cylindrical', 'spherical'] }] }, { value: 2, label: '2D', requires: [{ fact: 'domain.supports2d', reason: 'This setup is three-dimensional (its file says it does not make sense in 2D)' }], excludes: [{ fact: 'gravity.selfFlat', reason: 'Not available with self-gravity (but an axisymmetric (R, z) or spherical run has it)' }, { fact: 'parts.starFlat', reason: 'Not available with a star (but an axisymmetric (R, z) run takes one on its axis)' }] }, { value: 1, label: '1D', requires: [{ fact: 'domain.supports1d', reason: 'This setup is not one-dimensional (its file does not say it makes sense in 1D)' }], excludes: [{ fact: 'oneD.blocked', reason: 'Not available in 1D yet, or never (plans/one-dimensional.md)' }, { fact: 'parts.starLine', reason: 'Not available with a star, or with a point mass anywhere but a spherical run’s center' }] }), apply: 'restart', linkKey: 'dim' },
   { path: 'domain.n', label: 'Resolution', tip: 'Cells across the box; on an adaptive mesh, at its finest level', page: 'domain', control: num(16, 16384, { integer: true, factor: 2 }), apply: 'restart', linkKey: 'n' },
   { path: 'domain.amr', label: 'Refinement', tip: 'Adaptive mesh: levels of refinement below the coarsest grid. 0 puts every cell at the full resolution', page: 'domain', control: num(0, MAX_AMR_LEVELS, { integer: true, step: 1 }), apply: 'restart', linkKey: 'amr' },
   { path: 'domain.box', label: 'Box size', tip: 'Side of the box, in code units: the domain is a cube of this side centered on the origin', page: 'domain', control: num(1e-12, 1e30, { factor: 2, quantity: 'length' }), apply: 'restart', default: 1 },
   { path: 'domain.geometry', label: 'Geometry', tip: 'Cartesian, or a 2D body of revolution about the y axis, in (R, z): x is then R from the axis (the lower x face) to the box side, and cells are rings; or in (r, theta): x is then r from the inner radius to the box side, y theta from pole to pole', page: 'domain', apply: 'restart', default: 'cartesian',
-    control: pick({ value: 'cartesian', label: 'Cartesian' }, { value: 'cylindrical', label: 'Axisymmetric (R, z)', requires: [{ fact: 'domain.ndim', is: 2, reason: 'An axisymmetric run is two-dimensional' }] }, { value: 'spherical', label: 'Spherical (r, theta)', requires: [{ fact: 'domain.ndim', is: 2, reason: 'A spherical run is two-dimensional' }] }) },
+    control: pick({ value: 'cartesian', label: 'Cartesian' }, { value: 'cylindrical', label: 'Axisymmetric (R, z)', requires: [{ fact: 'domain.ndim', is: [1, 2], reason: 'An axisymmetric run is two-dimensional, or one-dimensional in R' }] }, { value: 'spherical', label: 'Spherical (r, theta)', requires: [{ fact: 'domain.ndim', is: [1, 2], reason: 'A spherical run is two-dimensional, or one-dimensional in r' }] }) },
   { path: 'domain.rMin', label: 'Inner radius', tip: 'A spherical (r, theta) run: the radius of its inner face (above zero); the box side is then its outer radius', page: 'domain', control: num(1e-12, 1e30, { factor: 2, quantity: 'length' }), apply: 'restart', default: 0.01 },
   { path: 'domain.logR', label: 'Logarithmic in r', tip: 'A spherical (r, theta) run: cells spaced evenly in ln r, so that they stay about as long as they are wide, rather than evenly in r', page: 'domain', control: check, apply: 'restart', default: false },
   { path: 'domain.symmetric', label: 'Symmetric under', tip: 'The mirrors (planes through the origin, named by the axis normal to each) the setup is symmetric under: a run may then compute only the part above them', page: 'domain', apply: 'live', default: 'none',
@@ -336,6 +351,7 @@ export const OPTIONS: Option[] = [
         { fact: 'symmetric.field', reason: 'The magnetic field is not symmetric under the mirrors' },
       ],
     }))) },
+  { path: 'domain.supports1d', label: 'Makes sense in 1D', tip: 'The setup can also run on a 1D grid: along x, or along r or R in a spherical or axisymmetric run', page: 'domain', control: check, apply: 'live', default: false },
   { path: 'domain.supports2d', label: 'Makes sense in 2D', tip: 'The setup can also run on a 2D (x, y) grid. Without it the setup is three-dimensional only', page: 'domain', control: check, apply: 'live', default: false },
   { path: 'domain.units', label: 'Physical units', tip: 'What one code unit is, for a setup that stands for something real: a length and a mass (the time unit then makes G = 1), or a length, a density and a velocity. Without them the setup is scale free and shown in code units', page: 'domain', apply: 'restart',
     control: { type: 'group', optional: true,

@@ -38,7 +38,7 @@ export interface TermRadiation {
 }
 
 export interface TermInput {
-  ndim: 2 | 3;
+  ndim: 1 | 2 | 3;
   dx: number;
   stencil: CellStencil;
   /** cell center, relative to the box center */
@@ -223,7 +223,7 @@ export function gravityAt(x: TermInput): [number, number, number] {
     const k = -m.gm / (r2 * Math.sqrt(r2));
     for (let a = 0; a < 3; a++) g[a] += k * d[a];
   }
-  if (x.ndim === 2) g[2] = 0;
+  for (let a: number = x.ndim; a < 3; a++) g[a] = 0;
   return g;
 }
 

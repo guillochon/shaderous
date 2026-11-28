@@ -18,7 +18,8 @@ export async function capture(sim: Simulation, meta?: Omit<SnapshotMeta, 'masses
   const cfg = sim.cfg;
   const lo = domainLo(cfg);
   const hi = domainHi(cfg);
-  const flat = cfg.ndim === 2;
+  const flat = cfg.ndim < 3;
+  const line = cfg.ndim === 1;
   let rootSize: number[];
   let blockSize: number[];
   let levels: Int32Array;
@@ -33,8 +34,8 @@ export async function capture(sim: Simulation, meta?: Omit<SnapshotMeta, 'masses
     const cells = await sim.readLeaves();
     const leaves = sim.tree.leaves();
     const n0 = sim.n >> cfg.amrLevels;
-    rootSize = [n0, n0, flat ? 1 : n0];
-    blockSize = [BS, BS, flat ? 1 : BS];
+    rootSize = [n0, line ? 1 : n0, flat ? 1 : n0];
+    blockSize = [BS, line ? 1 : BS, flat ? 1 : BS];
     levels = Int32Array.from(leaves.map((b) => b.level));
     locations = Int32Array.from(leaves.flatMap((b) => [b.c[0], b.c[1], flat ? 0 : b.c[2]]));
     ({ u1, u2 } = cells);
@@ -142,7 +143,7 @@ export async function capture(sim: Simulation, meta?: Omit<SnapshotMeta, 'masses
     ...(faces ? { faces } : {}),
     ...(opts.lazyPressure ? { pressureAt: pressureOf(cfg, u1, u2, X) } : {}),
     meta: meta ? { format: SNAPSHOT_FORMAT, ...meta, masses: restart.masses, ...(restart.frame ? { frame: restart.frame } : {}), ...(restart.orbitOmega !== undefined ? { orbitOmega: restart.orbitOmega } : {}), ...(debris ? { debris } : {}), ...(mhdMeta ? { mhd: mhdMeta } : {}) } : undefined,
-    ...(cfg.problem.geometry === 'cylindrical' && cfg.ndim === 2 ? { geometry: 'cylindrical' as const } : {}),
+    ...(cfg.problem.geometry === 'cylindrical' && cfg.ndim < 3 ? { geometry: 'cylindrical' as const } : {}),
     ...(spherical(cfg) ? sphericalAxes(cfg) : {}),
   };
 }

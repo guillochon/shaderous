@@ -4,7 +4,7 @@ import type { SimConfig } from '../../src/sim';
 import { orszagTang } from '../../src/presets/names';
 import { all, OUTFLOW, PERIODIC, type Problem } from '../../src/problems/types';
 
-const cfgOf = (problem: Problem, ndim: 2 | 3, periodic = true) =>
+const cfgOf = (problem: Problem, ndim: 1 | 2 | 3, periodic = true) =>
   ({ problem, ndim, params: {}, bcLo: all(periodic ? PERIODIC : OUTFLOW), bcHi: all(periodic ? PERIODIC : OUTFLOW) }) as unknown as SimConfig;
 
 /** Largest |div b| dx over all cells, from the faces, and the largest face value. */

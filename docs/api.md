@@ -117,7 +117,7 @@ by `npm run gen`.
 | --- | --- | --- |
 | `problem` | The run | Preset id |
 | `setup` | The run | A setup document of one’s own, packed (with problem=custom) |
-| `dim` | The run | 2 or 3 dimensions |
+| `dim` | The run | 1, 2 or 3 dimensions |
 | `n` | The run | Cells per side (the finest level’s on an adaptive mesh). Left out: the preset’s own grid |
 | `amr` | The run | Levels of refinement, 0 to 7. With n but no amr, the grid is uniform |
 | `tend` | Settings | End time (inf for none) |

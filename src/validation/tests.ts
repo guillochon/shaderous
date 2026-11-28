@@ -265,7 +265,7 @@ export async function withSim<T>(gpu: Gpu, problem: Problem, n: number, over: Pa
  * shell-averaged density, in `nb` shells out to half the box (cells weighed by their volume, or
  * their area in 2D).
  */
-function leafShockRadius(c: LeafCells, nb = 128, ndim: 2 | 3 = 3): number {
+function leafShockRadius(c: LeafCells, nb = 128, ndim: 1 | 2 | 3 = 3): number {
   const bw = 0.5 / nb;
   const sum = new Float64Array(nb);
   const vol = new Float64Array(nb);
@@ -3016,7 +3016,7 @@ export const TESTS: TestDef[] = [
     async run(gpu) {
       const metrics: Record<string, number> = {};
       let pass = true;
-      const cases: [Problem, number, 2 | 3, number][] = [
+      const cases: [Problem, number, 1 | 2 | 3, number][] = [
         [orszagTang, 64, 2, 20],
         [{ ...mhdBlast, bcLo: all(1), bcHi: all(1) }, 32, 3, 6],
       ];
@@ -3069,7 +3069,7 @@ export const TESTS: TestDef[] = [
     async run(gpu) {
       const metrics: Record<string, number> = {};
       let pass = true;
-      const cases: [Problem, number, 2 | 3][] = [
+      const cases: [Problem, number, 1 | 2 | 3][] = [
         [mhdRotor, 128, 2],
         [{ ...mhdBlast, bcLo: all(1), bcHi: all(1) }, 32, 3],
       ];
@@ -3102,7 +3102,7 @@ export const TESTS: TestDef[] = [
         });
       }
       // On blocks: the file holds every leaf's faces, and the restart rebuilds the same mesh.
-      const blocks: [Problem, number, 2 | 3, string][] = [
+      const blocks: [Problem, number, 1 | 2 | 3, string][] = [
         [fieldLoopDense, 256, 2, 'loop_blocks'],
         [{ ...mhdBlast, bcLo: all(1), bcHi: all(1) }, 128, 3, 'blast_blocks'],
       ];
@@ -3545,7 +3545,7 @@ export const TESTS: TestDef[] = [
     async run(gpu) {
       const m: Record<string, number> = {};
       let pass = true;
-      const cases: [Problem, number, 2 | 3, number, number][] = [
+      const cases: [Problem, number, 1 | 2 | 3, number, number][] = [
         [mhdRotor, 256, 2, 0.01, 0.03],
         [mhdBlast, 128, 3, 0.005, 1],
       ];
@@ -3596,7 +3596,7 @@ export const TESTS: TestDef[] = [
         for (const bytes of [null, small]) {
           setMhdScratchBytes(bytes);
           try {
-            await withAmr(gpu, mhdBlast, n, { ndim: ndim as 2 | 3, amrLevels: 1, ...over }, async (sim) => {
+            await withAmr(gpu, mhdBlast, n, { ndim: ndim as 1 | 2 | 3, amrLevels: 1, ...over }, async (sim) => {
               sim.step(10);
               const c = await sim.readLeaves();
               runs.push([c.u1, c.u2, await leafFaces(sim)]);
@@ -3668,7 +3668,7 @@ export const TESTS: TestDef[] = [
       let pass = true;
       // The blast in 2D, early on, has the contrast in signal speed that bins save work on; in the others
       // it is less than the factor of 2 a bin takes, and they check the stepping alone.
-      const cases: [Problem, number, 2 | 3, number, string][] = [
+      const cases: [Problem, number, 1 | 2 | 3, number, string][] = [
         [mhdRotor, 256, 2, Infinity, 'rotor'],
         [fieldLoopDense, 256, 2, 0.5, 'loop'],
         [mhdBlast, 512, 2, 0.05, 'blast_2d'],

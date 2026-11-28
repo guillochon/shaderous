@@ -34,7 +34,7 @@ export interface DiskContext {
   box: number;
   /** finest cells per side */
   n: number;
-  ndim: 2 | 3;
+  ndim: 1 | 2 | 3;
   /** G times the mass the disk orbits */
   gm: number;
   /** softening of that mass as the run has it (two cells at least), or half the separation of the bodies inside */

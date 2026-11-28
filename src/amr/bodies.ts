@@ -22,7 +22,7 @@ export class BodyBands {
 
   constructor(
     readonly surfaces: BodySurface[],
-    private readonly ndim: 2 | 3,
+    private readonly ndim: 1 | 2 | 3,
     /** lower corner of the domain, and the coarsest cell's side, in the box's lengths */
     private readonly lo: readonly number[],
     private readonly dx0: number,
@@ -100,7 +100,7 @@ export class BodyBands {
   }
 
   /** Bytes the paint buffer needs for `cap` slots. */
-  static bytes(ndim: 2 | 3, cap: number): number {
+  static bytes(ndim: 1 | 2 | 3, cap: number): number {
     return 4 * (HEAD + cap + PAINT_BLOCKS * ((BS * BS * (ndim === 3 ? BS : 1)) / 4));
   }
 }

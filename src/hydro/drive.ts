@@ -41,7 +41,7 @@ export interface DriveParams {
 export const defaultDrive = (): DriveParams => ({ accel: 0, tau: 0.5, kMin: 1, kMax: 2, zeta: 1, seed: 1 });
 
 /** The integer wavevectors of the band (one of each pair), shortest first, at most DRIVE_MODES. */
-export function driveModes(ndim: 2 | 3, kMin: number, kMax: number): [number, number, number][] {
+export function driveModes(ndim: 1 | 2 | 3, kMin: number, kMax: number): [number, number, number][] {
   const out: [number, number, number][] = [];
   const m = Math.floor(kMax);
   for (let i = -m; i <= m; i++)
@@ -64,7 +64,7 @@ export function driveModes(ndim: 2 | 3, kMin: number, kMax: number): [number, nu
  * keeps zeta^2 (d - 1) + (1 - zeta)^2 of it, and the box mean of |a|^2 is half the sum over
  * modes of |ar|^2 + |ai|^2.
  */
-export function driveSigma(p: DriveParams, ndim: 2 | 3, count: number): number {
+export function driveSigma(p: DriveParams, ndim: 1 | 2 | 3, count: number): number {
   const kept = p.zeta * p.zeta * (ndim - 1) + (1 - p.zeta) * (1 - p.zeta);
   return count > 0 && kept > 0 ? p.accel / Math.sqrt(count * kept) : 0;
 }
@@ -87,7 +87,7 @@ function normals(seed: number): () => number {
  * stationary distribution (so that the driving is at full strength from the start), or a
  * header of no modes when the driving is off.
  */
-export function packDrive(p: DriveParams, ndim: 2 | 3, box: number): ArrayBuffer {
+export function packDrive(p: DriveParams, ndim: 1 | 2 | 3, box: number): ArrayBuffer {
   const buf = new ArrayBuffer(DRIVE_BYTES);
   const u = new Uint32Array(buf);
   const f = new Float32Array(buf);
@@ -121,7 +121,7 @@ const buffers = new WeakMap<GPUDevice, GPUBuffer>();
  * simulation calls this when it is built and when it starts again, driving or not, so that the
  * passes that read the buffer find it bound, and a run without driving finds no modes.
  */
-export function writeDrive(device: GPUDevice, p: DriveParams, ndim: 2 | 3, box: number): void {
+export function writeDrive(device: GPUDevice, p: DriveParams, ndim: 1 | 2 | 3, box: number): void {
   let b = buffers.get(device);
   if (!b) {
     b = device.createBuffer({ label: 'turbulence driving', size: DRIVE_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });

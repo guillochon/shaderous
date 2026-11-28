@@ -46,9 +46,13 @@ export { REF_KINDS, type RefKind } from './hydro/refstate';
 export { LIMITER_KINDS, RIEMANN_KINDS, type LimiterKind, type RiemannKind } from './problems/types';
 
 export interface SimConfig {
-  /** Cells per side. The grid is n x n x n, or n x n x 1 (periodic in z) when ndim is 2. */
+  /**
+   * Cells per side. The grid is n x n x n, or n x n x 1 (periodic in z) when ndim is 2, or
+   * n x 1 x 1 when ndim is 1 (plans/one-dimensional.md: y and z periodic, each cell its own
+   * neighbor across them, so their fluxes cancel; a spherical run's one theta cell spans the sphere).
+   */
   n: number;
-  ndim: 2 | 3;
+  ndim: 1 | 2 | 3;
   /** Uniform external gravitational acceleration. */
   gext: [number, number, number];
   /** Values of the preset's own parameters (Problem.params). */
@@ -645,6 +649,11 @@ export function configFor(problem: Problem, n: number, over: Partial<SimConfig> 
     lo: [problem.bcLo[0], problem.bcLo[1], 0] as Bc3,
     hi: [problem.bcHi[0], problem.bcHi[1], 0] as Bc3,
   };
+  // 1D: y and z periodic, but a spherical run's theta keeps its poles.
+  const bc1 = {
+    lo: [problem.bcLo[0], problem.geometry === 'spherical' ? bc2.lo[1] : 0, 0] as Bc3,
+    hi: [problem.bcHi[0], problem.geometry === 'spherical' ? bc2.hi[1] : 0, 0] as Bc3,
+  };
   const params = Object.fromEntries((problem.params ?? []).map((q) => [q.id, q.value]));
   const cfg: Omit<SimConfig, 'symmetry'> & { symmetry?: [boolean, boolean, boolean] } = {
     n,
@@ -665,8 +674,8 @@ export function configFor(problem: Problem, n: number, over: Partial<SimConfig> 
     // (An axisymmetric run keeps it: it solves for its potential in (R, z).)
     gravity: ndim === 2 && isSelfGravity(problem.gravity) && problem.geometry !== 'cylindrical' && problem.geometry !== 'spherical' ? 'off' : problem.gravity,
     G: problem.G,
-    bcLo: ndim === 2 ? bc2.lo : problem.bcLo,
-    bcHi: ndim === 2 ? bc2.hi : problem.bcHi,
+    bcLo: ndim === 1 ? bc1.lo : ndim === 2 ? bc2.lo : problem.bcLo,
+    bcHi: ndim === 1 ? bc1.hi : ndim === 2 ? bc2.hi : problem.bcHi,
     cfl: 0.8,
     tEnd: problem.tEnd,
     rhoFloor: problem.rhoFloor ?? 1e-10,
@@ -775,7 +784,7 @@ export function withSymmetry(cfg: SimConfig, want: readonly boolean[] | undefine
   // runs, as for a problem with no mirrors, rather than a link's mirror stopping the page.)
   const fieldOk = !cfg.problem.mhd || !!cfg.problem.symmetry?.mhd;
   const allowed = fieldOk ? (cfg.problem.symmetry?.axes ?? [false, false, false]) : [false, false, false];
-  const sym = [0, 1, 2].map((a) => !!want?.[a] && allowed[a] && (a < 2 || cfg.ndim === 3)) as [boolean, boolean, boolean];
+  const sym = [0, 1, 2].map((a) => !!want?.[a] && allowed[a] && a < cfg.ndim) as [boolean, boolean, boolean];
   // (An axisymmetric run's lower x face is its axis, which reflects as such a plane does.)
   const bcLo = cfg.bcLo.map((b, a) => (sym[a] || (a === 0 && cylindrical(cfg)) || (a === 1 && spherical(cfg)) ? REFLECT : b)) as Bc3;
   // (A spherical run's theta faces are both its axis: they reflect, v_phi odd across them.)
@@ -784,7 +793,7 @@ export function withSymmetry(cfg: SimConfig, want: readonly boolean[] | undefine
 }
 
 /** The run is axisymmetric, in (R, z) (Problem.geometry). */
-export const cylindrical = (c: SimConfig): boolean => c.problem.geometry === 'cylindrical' && c.ndim === 2;
+export const cylindrical = (c: SimConfig): boolean => c.problem.geometry === 'cylindrical' && c.ndim < 3;
 
 /**
  * Why an axisymmetric run cannot go as configured, or null. The first version: hydrodynamics on
@@ -792,7 +801,7 @@ export const cylindrical = (c: SimConfig): boolean => c.problem.geometry === 'cy
  */
 export function cylindricalUnsupported(c: SimConfig): string | null {
   if (c.problem.geometry !== 'cylindrical') return null;
-  if (c.ndim !== 2) return 'an axisymmetric run is two-dimensional, in (R, z)';
+  if (c.ndim === 3) return 'an axisymmetric run is two-dimensional, in (R, z), or one-dimensional, in R';
   if (c.amrLevels > 0 && c.timeBins > 0) return 'per-block timesteps are not available for axisymmetric runs yet';
   if (c.problem.mhd && c.amrLevels > 0) return 'magnetic fields are not available for axisymmetric runs on blocks yet';
   if (c.problem.mhd && c.resistivity > 0) return 'resistivity is not available in axisymmetric runs yet';
@@ -818,6 +827,7 @@ export function cylindricalUnsupported(c: SimConfig): string | null {
  */
 export function refusal(c: SimConfig): string | null {
   const why: [string, string | null][] = [
+    ['One-dimensional run', oneDimUnsupported(c)],
     ['MHD', mhdOn(c) ? mhdUnsupported(c) : null],
     ['Liquid', c.eos === 'liquid' ? liquidUnsupported(c) : null],
     ['Implicit pressure', implicitPressure(c) ? implicitUnsupported(c) : null],
@@ -834,6 +844,28 @@ export function refusal(c: SimConfig): string | null {
   ];
   const hit = why.find(([, w]) => w);
   return hit ? `${hit[0]}: ${hit[1]}` : null;
+}
+
+/**
+ * Why a 1D run (plans/one-dimensional.md) cannot go as configured, or null. Each module not
+ * built for 1D yet says which phase of the plan brings it; some never apply in 1D.
+ */
+export function oneDimUnsupported(c: SimConfig): string | null {
+  if (c.ndim !== 1) return null;
+  if (c.amrLevels > 0) return 'the adaptive mesh is not available in 1D yet (plans/one-dimensional.md, phase 3)';
+  if (c.problem.shear) return 'a shearing box needs two axes';
+  if (c.problem.disk) return 'a disk needs two axes';
+  if (c.cutCells || c.problem.obstacleDistances) return 'partly filled cells and meshes do not apply in 1D';
+  if (c.problem.mhd) return 'magnetic fields are not available in 1D yet (plans/one-dimensional.md, phase 9)';
+  if (radiationOn(c)) return 'radiation is not available in 1D yet (phase 10)';
+  if ((c.problem.species?.length ?? 0) > 0 || burnSpec(c) || c.cooling !== 'off') return 'species, burning and cooling are not available in 1D yet (phase 6)';
+  if (c.viscosity > 0 || conducts(c) || c.resistivity > 0) return 'viscosity and conduction are not available in 1D yet (phase 7)';
+  if (c.driving.accel > 0) return 'turbulence driving is not available in 1D yet (phase 7)';
+  if (c.problem.rotation || c.problem.frame || cosmologyOf(c)) return 'rotating and accelerating frames and comoving coordinates are not available in 1D yet (phase 8)';
+  if (implicitPressure(c) || c.eos === 'liquid') return 'implicit pressure and the liquid are not available in 1D yet (phase 11)';
+  if (c.problem.bodies?.length || c.problem.moving?.length || c.problem.surfaces) return 'obstacles and moving bodies are not available in 1D yet (phase 12)';
+  if (c.problem.debris) return 'debris and particles are not available in 1D yet (phase 13)';
+  return null;
 }
 
 /** The gas is stored as its deviation from a reference state (SimConfig.reference, hydro/ref_on.wgsl). */
@@ -927,7 +959,7 @@ export const implicitPressure = (c: SimConfig): boolean => c.pressure === 'impli
  * (kick form).
  */
 export function energyCorrection(c: SimConfig): boolean {
-  const solved = isSelfGravity(c.gravity) && (c.ndim === 3 || cylindrical(c)) && !spherical(c);
+  const solved = isSelfGravity(c.gravity) && (c.ndim === 3 || (cylindrical(c) && c.ndim === 2)) && !spherical(c);
   return solved && c.gravEnergyFlux && c.eos !== 'barotropic' && !cosmologyOf(c) && !implicitPressure(c);
 }
 /** The clock's build constants for implicit pressure: a gas with an energy combines its two step limits (hydro/clock.wgsl PSPLIT_GAS). */
@@ -979,7 +1011,7 @@ export { spherical } from './spherical';
  */
 export function sphericalUnsupported(c: SimConfig): string | null {
   if (c.problem.geometry !== 'spherical') return null;
-  if (c.ndim !== 2) return 'a spherical run is two-dimensional, in (r, theta)';
+  if (c.ndim === 3) return 'a spherical run is two-dimensional, in (r, theta), or one-dimensional, in r';
   const s = c.problem.sphere;
   if (!s || !(s.rMin > 0)) return 'a spherical run needs an inner radius above zero';
   if (c.problem.mhd) return 'magnetic fields are not available in spherical runs yet';
@@ -1114,7 +1146,8 @@ export function symmetryUnsupported(c: SimConfig): string | null {
  */
 export function uniformField(c: SimConfig): [number, number, number] {
   const g = [...c.gext] as [number, number, number];
-  if (c.gravity === 'constant') g[c.ndim === 2 ? 1 : 2] -= c.G;
+  // (Down: -z in 3D, -y in 2D, -x in 1D.)
+  if (c.gravity === 'constant') g[c.ndim - 1] -= c.G;
   return g;
 }
 
@@ -1178,7 +1211,7 @@ export function rotationOf(c: SimConfig): [number, number, number, number] {
   if (c.problem.shear) return [0, 0, c.problem.shear.omega, 0];
   const r = c.problem.rotation?.(c.params, c.ndim);
   if (!r) return [0, 0, 0, 0];
-  const w: [number, number, number] = c.ndim === 2 ? [0, 0, r.omega[2]] : [...r.omega];
+  const w: [number, number, number] = c.ndim === 1 ? [0, 0, 0] : c.ndim === 2 ? [0, 0, r.omega[2]] : [...r.omega];
   if (w.every((x) => x === 0)) return [0, 0, 0, 0];
   // A binary's frame, at the Omega its settled stars orbit at (SimConfig.orbitOmega, or a snapshot's).
   const settled = c.orbitOmega ?? c.restart?.orbitOmega;
@@ -1666,8 +1699,8 @@ export function packParams(
   f.set(eosConstants1(c.eos, c.eosParams), 8);
   // The fourth: 1 on a rectangular uniform grid (gridDims; hydro/common.wgsl grid_n).
   u.set([...x.dims, x.rect ? 1 : 0], 12);
-  // 2D quantities are per unit length along z.
-  f.set([c.ndim === 2 ? x.dx ** 2 : x.dx ** 3, c.ndim, ...(x.refine ?? [0, 0])], 16);
+  // 2D quantities are per unit length along z, 1D ones per unit area across x.
+  f.set([x.dx ** c.ndim, c.ndim, ...(x.refine ?? [0, 0])], 16);
   f.set([...uniformField(c), 0], 20);
   // Point masses: how many, whether the frame follows the gas, whether there are any, and
   // whether they are all the field texture holds (no Poisson potential).
@@ -2195,7 +2228,7 @@ export class Sim implements Simulation {
    * pair, gravity field) and, in 3D, the multigrid solver's r32float levels (potential, source,
    * residual at each coarser level, about 8/7 of a grid each, and the previous potential).
    */
-  static cellBytes(ndim: 2 | 3): number {
+  static cellBytes(ndim: 1 | 2 | 3): number {
     // (3D: the old potential, the energy's correction (8, with self-gravity: gravity/rhs.wgsl)
     // and the multigrid levels.)
     return 7 * 16 + (ndim === 3 ? 4 + 8 + 3 * 4 * (8 / 7) : 0);
@@ -2278,7 +2311,9 @@ export class Sim implements Simulation {
       // (potential, multipoles) still exist; it is never dispatched.
       [sim.mg, sim.redDt] = await Promise.all([
         // (A spherical run's monopole writes the solver's potential textures in its place.)
-        Multigrid.create(d, cfg.ndim === 2 && !cylindrical(cfg) && !spherical(cfg) ? 2 : [nx, ny, nz], cfg.problem.box, sim.params, [sim.state[0][0], sim.state[1][0]], cfg.symmetry, sim.clock, cylindrical(cfg) || spherical(cfg), energyCorrection(cfg)),
+        // (A 1D run's self-gravity is a prefix sum, not this solver's: it keeps the placeholder,
+        // but a spherical run, whose monopole writes these textures.)
+        Multigrid.create(d, (cfg.ndim === 2 && !cylindrical(cfg) && !spherical(cfg)) || (cfg.ndim === 1 && !spherical(cfg)) ? 2 : [nx, ny, nz], cfg.problem.box, sim.params, [sim.state[0][0], sim.state[1][0]], cfg.symmetry, sim.clock, cylindrical(cfg) || spherical(cfg), energyCorrection(cfg)),
         Reducer.create(
           d,
           [nx, ny, nz],
@@ -2686,7 +2721,8 @@ export class Sim implements Simulation {
       const z = nz === 1 ? 0 : (k + 0.5) * this.dx + lo[2];
       for (let j = 0; j < ny; j++) {
         // (A spherical run's init takes (r, theta).)
-        const y = sph ? sph.theta(j) : (j + 0.5) * this.dx + lo[1];
+        // (A 1D run's line is y = z = 0, as a 2D run's plane is z = 0.)
+        const y = sph ? sph.theta(j) : ny === 1 ? 0 : (j + 0.5) * this.dx + lo[1];
         for (let i = 0; i < nx; i++, o += 4) {
           const x = sph ? sph.r(i) : (i + 0.5) * this.dx + lo[0];
           const w = fn(x, y, z);

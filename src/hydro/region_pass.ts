@@ -43,19 +43,23 @@ export interface Split {
 /** The interior box and the slabs that hold every cell outside it. */
 export function splitRegions(dims: number[], tile = false): Split {
   const flat = dims[2] === 1;
+  // A 1D run (plans/one-dimensional.md): one row, its workgroups along it.
+  const line = flat && dims[1] === 1;
   // 256 invocations per workgroup either way; a single layer gets them all in the plane. A 3D
   // face-flux tile for 8 x 8 x 4 would take 42 KB, more than devices offer: half as many.
-  const wg = flat ? [16, 16, 1] : tile ? [8, 4, 4] : [8, 8, 4];
+  const wg = line ? [64, 1, 1] : flat ? [16, 16, 1] : tile ? [8, 4, 4] : [8, 8, 4];
   // A pass with a face-flux tile is not split: one pipeline computes every face, so that the
   // two workgroups sharing a face run the same compiled code on it (hydro/tile.wgsl).
   if (tile) return { lo: [0, 0, 0], hi: [0, 0, 0], interior: null, shell: [{ origin: [0, 0, 0], size: dims, wg }] };
-  // An axis with a single layer (2D) has no boundary cells along it.
-  const lo = dims.map((n) => (n === 1 ? 0 : REACH));
-  const hi = dims.map((n) => (n === 1 ? 1 : n - REACH));
+  // An axis with a single layer (2D) has no boundary cells along it. A 1D run's y is no such
+  // axis: its passes load the cell's neighbors along y, which are the cell itself through the
+  // periodic (or a pole's reflecting) mapping, so every cell is in the shell.
+  const lo = dims.map((n, a) => (n === 1 && !(line && a === 1) ? 0 : REACH));
+  const hi = dims.map((n, a) => (n === 1 && !(line && a === 1) ? 1 : n - REACH));
   const all: Dispatch = { origin: [0, 0, 0], size: dims, wg };
   if (hi.some((h, a) => h <= lo[a])) return { lo: [0, 0, 0], hi: [0, 0, 0], interior: null, shell: [all] };
   const slab = (axis: number, from: number[], to: number[]): Dispatch => {
-    const w = flat ? [16, 16, 1] : [8, 8, 4];
+    const w = line ? [64, 1, 1] : flat ? [16, 16, 1] : [8, 8, 4];
     w[axis] = REACH;
     return { origin: from, size: to.map((t, a) => t - from[a]), wg: w };
   };

@@ -466,7 +466,7 @@ default, and what it does. A number out of its range is held to it when the file
 
 | Key | In the dialog | Values | Meaning |
 | --- | --- | --- | --- |
-| `domain.ndim` | Dimensions | `3`, `2` | Two or three dimensions. A 2D run is one layer of cells in x and y |
+| `domain.ndim` | Dimensions | `3`, `2`, `1` | One, two or three dimensions. A 2D run is one layer of cells in x and y; a 1D run one row along x (or r, or R), drawn repeated across the axis it does not resolve |
 | `domain.n` | Resolution | a whole number, 16 to 16384 | Cells across the box; on an adaptive mesh, at its finest level |
 | `domain.amr` | Refinement | a whole number, 0 to 7 | Adaptive mesh: levels of refinement below the coarsest grid. 0 puts every cell at the full resolution |
 | `domain.box` | Box size | a number, 1e-12 to 1e+30. Default `1` | Side of the box, in code units: the domain is a cube of this side centered on the origin |
@@ -476,6 +476,7 @@ default, and what it does. A number out of its range is held to it when the file
 | `domain.symmetric` | Symmetric under | `none`, `x`, `y`, `z`, `xy`, `xz`, `yz`, `xyz`. Default `none` | The mirrors (planes through the origin, named by the axis normal to each) the setup is symmetric under: a run may then compute only the part above them |
 | `domain.symmetricField` | Field symmetric too | `true` or `false`. Default `false` | The magnetic field is symmetric under those mirrors as well (a vector potential odd in its normal component and even in the others) |
 | `domain.mirror` | Mirror symmetry | `none`, `x`, `y`, `z`, `xy`, `xz`, `yz`, `xyz`. Default `none` | Compute only the part of a symmetric setup above its planes of symmetry, each mirrored axis’s lower face a plane of symmetry; the totals are those of the whole. With every axis mirrored (an octant in 3D, a quadrant in 2D) each runs from 0 to the box side: twice the resolution for the same cells. With only some (a half, or a quadrant in 3D) those run from 0 to half the box with half the cells: the same cube as without mirrors, at half or a quarter of the cost |
+| `domain.supports1d` | Makes sense in 1D | `true` or `false`. Default `false` | The setup can also run on a 1D grid: along x, or along r or R in a spherical or axisymmetric run |
 | `domain.supports2d` | Makes sense in 2D | `true` or `false`. Default `false` | The setup can also run on a 2D (x, y) grid. Without it the setup is three-dimensional only |
 | `domain.units` | Physical units | an object, which may be left out, in one of 2 shapes: length and mass (`mass`); or length, density and velocity (`density`, `velocity`) | What one code unit is, for a setup that stands for something real: a length and a mass (the time unit then makes G = 1), or a length, a density and a velocity. Without them the setup is scale free and shown in code units |
 | `domain.units.name` | Name | text. Default `custom` | A name for the unit system |

@@ -95,7 +95,7 @@ function f32Below(x: number): number {
 /** Most bytes read back from the GPU in one staging buffer (AmrSim.readBoxes). */
 const READ_CHUNK_BYTES = 256 * 1024 * 1024;
 /** Bytes per block of the species' face mass fluxes (amr/species.wgsl): (BS + 1)^d faces of three axes. */
-const speciesFaceBytes = (ndim: 2 | 3) => (BS + 1) ** 2 * (ndim === 3 ? BS + 1 : 1) * 3 * 4;
+const speciesFaceBytes = (ndim: 1 | 2 | 3) => (BS + 1) ** 2 * (ndim === 3 ? BS + 1 : 1) * 3 * 4;
 /** The GPU's settling (amr/settle.wgsl): its uniform's size, and the most stars it takes. */
 const SETTLE_BYTES = 736;
 const SETTLE_MAX_STARS = 4;
@@ -696,7 +696,7 @@ export class AmrSim implements Simulation {
    */
   static atlasLimits(
     d: GPUDevice,
-    o: { ndim: 2 | 3; blockBytes: number; register: boolean; massFlux: boolean; groups: number },
+    o: { ndim: 1 | 2 | 3; blockBytes: number; register: boolean; massFlux: boolean; groups: number },
   ): { blocks: number; groups: number } {
     const { ndim, groups } = o;
     // The device's GPU memory budget (gpu/memory.ts: set by the user, or guessed: 2.5 GB on a
@@ -721,7 +721,7 @@ export class AmrSim implements Simulation {
    * this device: what io/view.ts planView plans a checkpoint's view against. `groups`: the
    * species' groups, held with the state (0 when one field is held).
    */
-  static viewCapacity(d: GPUDevice, ndim: 2 | 3, blockBytes: number, groups: number): number {
+  static viewCapacity(d: GPUDevice, ndim: 1 | 2 | 3, blockBytes: number, groups: number): number {
     return AmrSim.atlasShape(d, ndim, AmrSim.atlasLimits(d, { ndim, blockBytes, register: false, massFlux: false, groups })).cap;
   }
 
@@ -730,7 +730,7 @@ export class AmrSim implements Simulation {
    * and what a texture's sides hold: a cube of slots in 3D, layers of squares in 2D. Its `cap`
    * may be less than `want` or `fit.blocks`, rounded down to that shape.
    */
-  static atlasShape(d: GPUDevice, ndim: 2 | 3, fit: { blocks: number; groups: number }, want = Infinity): { slotsPerSide: number; layers: number; cap: number } {
+  static atlasShape(d: GPUDevice, ndim: 1 | 2 | 3, fit: { blocks: number; groups: number }, want = Infinity): { slotsPerSide: number; layers: number; cap: number } {
     const limit = Math.floor(Math.min(d.limits.maxTextureDimension3D, 2048) / PAD);
     if (ndim === 3) {
       // 3D passes over the blocks, self-gravity's multigrid's too, run in slabs along z
@@ -754,7 +754,7 @@ export class AmrSim implements Simulation {
    * GPU bytes per atlas block: nine rgba32float textures (two state pairs, primitives,
    * predictor, gravity field) and two r32float ones (gravity's previous potential and its rate).
    */
-  static blockBytes(ndim: 2 | 3, mhd = false, speciesGroups = 0, comp = false): number {
+  static blockBytes(ndim: 1 | 2 | 3, mhd = false, speciesGroups = 0, comp = false): number {
     // A magnetic field adds its own atlas textures and its flux register (mhd/amr_mhd.ts).
     // Species add four atlas textures of their groups (the fractions at both parities, at the
     // half step and as fractions), the composition's moments where they set the equation of
