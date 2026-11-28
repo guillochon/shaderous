@@ -72,9 +72,9 @@
     "n": {
      "type": "integer",
      "title": "Resolution",
-     "description": "Cells across the box; on an adaptive mesh, at its finest level",
+     "description": "Cells across the box; on an adaptive mesh, at its finest level (up to 16384 in 2D, 262144 in 1D)",
      "minimum": 16,
-     "maximum": 16384
+     "maximum": 262144
     },
     "amr": {
      "type": "integer",

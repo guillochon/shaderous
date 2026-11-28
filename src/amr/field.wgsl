@@ -151,7 +151,7 @@ fn leaf_at(frac0: vec3<f32>) -> Leaf {
   // (A 1D run's leaf index is a row, and its blocks' rows are all alike: the first.)
   if (is1d()) { frac.y = 0.0; }
   let m = i32(P.amr.y << P.amr.z);
-  let slot = i32(textureLoad(IDX, vec3<i32>(frac * f32(m)), 0).x);
+  let slot = i32(textureLoad(IDX, idx_texel(vec3<i32>(frac * f32(m))), 0).x);
   g_dx = blk_dx(slot);
   let level = i32(bt(slot, 0u));
   let nblk = i32(P.amr.y) * (1 << u32(level));

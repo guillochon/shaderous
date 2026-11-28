@@ -80,9 +80,9 @@ const number = (id: string, attrs = '', factor = 0) =>
 // leaf index (one entry per finest block, amr/amr_sim.ts) is 64 MB, counted by gridBytes.
 const RES_3D = [32, 64, 128, 256, 512, 1024, 2048, 4096];
 const RES_2D = [128, 256, 512, 1024, 2048, 4096, 8192, 16384];
-// 1D runs (plans/one-dimensional.md): a row of cells, uniform up to 2048 (UNIFORM_MAX), adaptive
-// up to 32768 (the leaf index, a row of one entry per finest block, is a 3D texture's side).
-const RES_1D = [256, 512, 1024, 2048, 4096, 8192, 16384, 32768];
+// 1D runs (plans/one-dimensional.md): a row of cells, uniform up to 2048 (UNIFORM_MAX, a 3D
+// texture's side), adaptive beyond.
+const RES_1D = [256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144];
 const resFor = (ndim: 1 | 2 | 3) => (ndim === 1 ? RES_1D : ndim === 2 ? RES_2D : RES_3D);
 /**
  * A 1D run's chip (plans/one-dimensional.md): what the view repeats, and why, or null for a run

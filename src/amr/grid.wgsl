@@ -33,6 +33,13 @@ fn is2d() -> bool {
 fn is1d() -> bool {
   return P.dims.y == 1u;
 }
+// The leaf index's texel of finest block i (along each axis): a 1D run's index, a row of up to
+// 16384 entries, is folded into rows of IDX1_W, a 3D texture's side (AmrSim's 'leaf index').
+const IDX1_W = 2048;
+fn idx_texel(i: vec3<i32>) -> vec3<i32> {
+  if (is1d()) { return vec3<i32>(i.x % IDX1_W, i.x / IDX1_W, 0); }
+  return i;
+}
 // The axes the stencils reach along: 3, 2 in 2D, 1 in 1D.
 fn blk_axes() -> i32 {
   return select(select(3, 2, is2d()), 1, is1d());

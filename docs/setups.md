@@ -467,7 +467,7 @@ default, and what it does. A number out of its range is held to it when the file
 | Key | In the dialog | Values | Meaning |
 | --- | --- | --- | --- |
 | `domain.ndim` | Dimensions | `3`, `2`, `1` | One, two or three dimensions. A 2D run is one layer of cells in x and y; a 1D run one row along x (or r, or R), drawn repeated across the axis it does not resolve |
-| `domain.n` | Resolution | a whole number, 16 to 16384 | Cells across the box; on an adaptive mesh, at its finest level |
+| `domain.n` | Resolution | a whole number, 16 to 262144 | Cells across the box; on an adaptive mesh, at its finest level (up to 16384 in 2D, 262144 in 1D) |
 | `domain.amr` | Refinement | a whole number, 0 to 7 | Adaptive mesh: levels of refinement below the coarsest grid. 0 puts every cell at the full resolution |
 | `domain.box` | Box size | a number, 1e-12 to 1e+30. Default `1` | Side of the box, in code units: the domain is a cube of this side centered on the origin |
 | `domain.geometry` | Geometry | `cartesian`, `cylindrical`, `spherical`. Default `cartesian` | Cartesian, or a 2D body of revolution about the y axis, in (R, z): x is then R from the axis (the lower x face) to the box side, and cells are rings; or in (r, theta): x is then r from the inner radius to the box side, y theta from pole to pole |

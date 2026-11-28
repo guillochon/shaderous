@@ -11,7 +11,9 @@ the cylindrical view is a half-disk like the spherical one, and the 1D chip alon
   them, so the y fluxes cancel and the shaders were not changed to skip them: every cell of a 1D
   run goes through the boundary-mapped pass (`region_pass.ts`), and `grid_n()` has one cell
   along y. Workgroups along the row (64 x 1). Uniform 1D grids go up to 2048 cells, a 3D
-  texture's side; finer ones are adaptive, up to 32768 (the leaf index is a row of the same cap).
+  texture's side; finer ones are adaptive, up to 262144 (the leaf index, a row of one entry per
+  finest block, folded into rows of 2048: `amr/grid.wgsl idx_texel`). Checked at 65536, 131072 and
+  262144 cells (5, 6 and 7 levels): Sod on the exact plateau with mass exact.
 - **Blocks** (decision 2, as built second): a 1D block is one row of BS cells and NGH ghosts at
   each end, PADW texels of a row of the atlas (`amr/grid.wgsl blk_origin`; `AmrSim.atlasShape`
   puts `side` slots to a row and `side` PADW rows to a layer). The invocation decoders give

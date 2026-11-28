@@ -126,6 +126,8 @@ const ARG = (i: number) => 12 * i;
 /** Workgroups per block of a flat dispatch (amr/list.wgsl, inv_flat) out to `reach` ghost layers. */
 // (A 1D run's block is a row: one workgroup takes it and its ghosts, amr/list.wgsl inv_flat.)
 const flatGroups = (ndim: number, reach: number) => Math.ceil((BS + 2 * reach) ** ndim / 64);
+/** The width of a 1D run's leaf index, folded into rows of it (amr/grid.wgsl IDX1_W). */
+const IDX1_W = 2048;
 /** Blocks of a 1D run to one of a 2D dispatch's quads: amr/list.wgsl ROWS1_INTERIOR and ROWS1_PADDED, four of them. */
 const QUAD1_INTERIOR = 4 * 16;
 const QUAD1_PADDED = 4 * 24;
@@ -656,8 +658,8 @@ export class AmrSim implements Simulation {
     const m = nr << this.levels;
     this.idx = d.createTexture({
       label: 'leaf index',
-      // (A 1D run's is a row: its side, m, is within a 3D texture's 2048 up to 32768 cells.)
-      size: [m, cfg.ndim === 1 ? 1 : m, cfg.ndim === 3 ? m : 1],
+      // (A 1D run's is a row of m, folded into rows of IDX1_W: amr/grid.wgsl idx_texel.)
+      size: cfg.ndim === 1 ? [Math.min(m, IDX1_W), Math.ceil(m / IDX1_W), 1] : [m, m, cfg.ndim === 3 ? m : 1],
       dimension: '3d',
       format: 'r32uint',
       // COPY_SRC: re-meshing a magnetic field reads the old index (mhd/amr_regrid.wgsl).
@@ -2606,6 +2608,17 @@ export class AmrSim implements Simulation {
     // Firefox drew stale blocks that way (the index kept slots the re-mesh had reused), while
     // Chrome drew the same state correctly.
     for (const { o, s } of boxes) {
+      if (this.cfg.ndim === 1) {
+        // A row of m, written as the pieces of the texture's rows of IDX1_W it falls on.
+        for (let at = o[0]; at < o[0] + s[0]; ) {
+          const row = Math.floor(at / IDX1_W);
+          const end = Math.min(o[0] + s[0], (row + 1) * IDX1_W);
+          const data = grid.slice(at, end) as Uint32Array<ArrayBuffer>;
+          d.queue.writeTexture({ texture: this.idx, origin: [at - row * IDX1_W, row, 0] }, data, { offset: 0, bytesPerRow: (end - at) * 4, rowsPerImage: 1 }, [end - at, 1, 1]);
+          at = end;
+        }
+        continue;
+      }
       const data = gridBox(grid, m, o, s) as Uint32Array<ArrayBuffer>;
       d.queue.writeTexture({ texture: this.idx, origin: o }, data, { offset: 0, bytesPerRow: s[0] * 4, rowsPerImage: s[1] }, s);
     }

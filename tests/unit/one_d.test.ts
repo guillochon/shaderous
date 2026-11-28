@@ -117,6 +117,21 @@ describe('1D profile lines', () => {
   });
 });
 
+describe('1D grids up to 262144 cells', () => {
+  it('index a leaf a finest block, 16384 of them at 262144 cells', () => {
+    // 262144 cells, 7 levels: 128 root blocks, 16384 finest blocks.
+    const t = new BlockTree(1, 128, 7, 40000, [1, 0, 0], [1, 0, 0], false, [128, 1, 1]);
+    t.adapt((b) => (b.c[0] === 0 ? 1 : 0), 0.6, 0.2);
+    expect(t.indexGrid().length).toBe(16384);
+  });
+  it('are offered by the option table and kept by links', () => {
+    const n = OPTIONS.find((o) => o.path === 'domain.n')!;
+    expect(n.control.type === 'number' && n.control.max).toBe(262144);
+    const l = decodeLink(new URLSearchParams('problem=sod-x&dim=1&n=262144&amr=7'));
+    expect([l.ndim, l.n, l.amr]).toEqual([1, 262144, 7]);
+  });
+});
+
 describe('1D links', () => {
   it('carry dim=1 both ways', () => {
     const problem = problemById('sod-x');
