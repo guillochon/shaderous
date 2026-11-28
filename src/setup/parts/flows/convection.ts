@@ -16,6 +16,8 @@ const convection: FlowDef<{ delta: number; beta: number; seed: number; cells: nu
   label: 'Convecting layer',
   tip: 'A layer of ideal gas in a unit box, stratified as a polytrope steeper than the adiabat, in balance with the uniform downward acceleration of the setup (Gravity: Uniform acceleration), between walls at the bottom and top: it overturns in convection cells. Seeded with cells at a given Mach number. Up is y in 2D and z in 3D. Below an excess of about 1e-4 on 128 cells the scheme’s own error in the layer’s buoyancy drives the flow, not the excess',
   wholeBox: true,
+  // A layer needs an axis up and one across it for its cells: not a 1D run.
+  requires: [{ fact: 'domain.ndim', is: [2, 3], reason: 'A convecting layer needs an axis up and one across it: not a 1D run' }],
   fields: {
     delta: { label: 'Superadiabatic excess', default: 0.01, min: 1e-6, max: 0.2, factor: 2, tip: 'How much steeper the layer is than the adiabat: dln T / dln p less its adiabatic value (gamma - 1) / gamma. The more, the faster it overturns. Below about 1e-4 on 128 cells (less on finer grids) the scheme’s own error in the buoyancy is larger than the excess, and the flow is the grid’s' },
     beta: { label: 'Temperature drop', default: 0.5, min: 0.01, max: 0.95, step: 0.01, tip: 'The fraction by which the temperature falls from the bottom to the top. The density falls by about its power 1.5, the pressure by its power 2.5' },
@@ -28,12 +30,14 @@ const convection: FlowDef<{ delta: number; beta: number; seed: number; cells: nu
     // The setup's own downward acceleration, which the layer is in balance with.
     const gext = ctx.spec.physics?.gext;
     const g = gext === undefined ? 1 : Array.isArray(gext) ? -gext[ndim === 2 ? 1 : 2] : gext.down;
-    // The smooth polytrope T = 1 - beta z', rho = T^m, p = p_b T^(m+1), in balance for p_b = g / ((m + 1) beta),
-    // with m set by the excess: 1 / (m + 1) = (gamma - 1) / gamma + delta.
-    const m = 1 / ((gamma - 1) / gamma + q.delta) - 1;
-    const pb = g / ((m + 1) * q.beta);
-    const cb = Math.sqrt(gamma * pb);
+    // The smooth polytrope T = 1 - beta z / L, rho = T^m, p = p_b T^(m+1), in balance for
+    // p_b = g L / ((m + 1) beta), with m set by the excess: 1 / (m + 1) = (gamma - 1) / gamma + delta.
+    // (Without L the layer of a box past 1 weighed more than its base pressure held up: random
+    // 1D seed 20723, box 4, went negative halfway up.)
     const L = ctx.box;
+    const m = 1 / ((gamma - 1) / gamma + q.delta) - 1;
+    const pb = (g * L) / ((m + 1) * q.beta);
+    const cb = Math.sqrt(gamma * pb);
     const k = (2 * Math.PI * Math.round(q.cells)) / L;
     // A stream function psi = A sin(pi z') cos(k x) (mass flux rho v = curl psi in 2D, free of
     // divergence): its peak speed, at the bottom, q.seed * cb.

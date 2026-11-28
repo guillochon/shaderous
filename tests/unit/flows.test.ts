@@ -114,3 +114,21 @@ describe('the built-in flows', () => {
     });
   }
 });
+
+describe('the convecting layer', () => {
+  // Random 1D seed 20723: in a box of 4 the layer's base pressure was a unit box's, and its weight
+  // took the pressure below zero halfway up.
+  it('holds up its own weight in a box of any size', () => {
+    for (const box of [1, 4]) {
+      const spec: SetupSpec = { format: 'shaderous-setup', version: 1, domain: { ndim: 2, box, supports2d: true }, physics: { eos: 'ideal', eosParams: { gamma: 5 / 3 }, gravity: 'constant', gext: [0, -1, 0] }, parts: [{ kind: 'flow', id: 'f', name: 'convection' } as FlowPart] } as SetupSpec;
+      const { problem } = compileSetup(spec);
+      const cfg = configFor(problem, 64, { ndim: 2 });
+      const at = problem.init(64, makeEos(cfg.eos, cfg.eosParams), 2, cfg.params);
+      const top = at(0, box * 0.49, 0);
+      const bottom = at(0, -box * 0.49, 0);
+      expect(top.p).toBeGreaterThan(0);
+      // The temperature falls by the default drop of a half whatever the box.
+      expect(top.p / top.rho / (bottom.p / bottom.rho)).toBeCloseTo(0.5, 1);
+    }
+  });
+});
