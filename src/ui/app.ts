@@ -20,7 +20,7 @@ import { initialFaces } from '../mhd/mhd';
 import { blockFaces } from '../mhd/amr_mhd';
 import type { Block } from '../amr/tree';
 import { boxFrac, fracPos, gridDims } from '../domain';
-import { clipSegment, distanceAt, distances, drawProfilePlot, MAX_PROFILES, plotLength, PROFILE_COLORS, profileCsv, profileDash, resolveField, sampleCount, sampleNear, samplePoints, seriesRange } from './profile';
+import { clipSegment, lockLine, distanceAt, distances, drawProfilePlot, MAX_PROFILES, plotLength, PROFILE_COLORS, profileCsv, profileDash, resolveField, sampleCount, sampleNear, samplePoints, seriesRange } from './profile';
 import { radiationOn, syncRadiationEos } from '../radiation/radiation';
 import { cellEquations, importance, rampColor, type Equation } from './terms';
 import { opacity as meanOpacity } from '../opacity/opacity';
@@ -80,8 +80,9 @@ const number = (id: string, attrs = '', factor = 0) =>
 // leaf index (one entry per finest block, amr/amr_sim.ts) is 64 MB, counted by gridBytes.
 const RES_3D = [32, 64, 128, 256, 512, 1024, 2048, 4096];
 const RES_2D = [128, 256, 512, 1024, 2048, 4096, 8192, 16384];
-// 1D runs (plans/one-dimensional.md): a row of cells, uniform up to the largest.
-const RES_1D = [256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536];
+// 1D runs (plans/one-dimensional.md): a row of cells, uniform up to 2048 (UNIFORM_MAX), adaptive
+// up to 32768 (the leaf index, a row of one entry per finest block, is a 3D texture's side).
+const RES_1D = [256, 512, 1024, 2048, 4096, 8192, 16384, 32768];
 const resFor = (ndim: 1 | 2 | 3) => (ndim === 1 ? RES_1D : ndim === 2 ? RES_2D : RES_3D);
 /**
  * A 1D run's chip (plans/one-dimensional.md): what the view repeats, and why, or null for a run
@@ -626,14 +627,17 @@ function syncTools() {
   if (noTemp && tool === 'temperature') tool = null;
   // A star needs self-gravity (3D only), and an equation of state that leaves K free.
   const noStar = (cfg?.ndim ?? 3) < 3
-    ? 'A star needs self-gravity, which a 2D run does not have'
+    ? `A star needs self-gravity in 3D, which a ${cfg?.ndim === 1 ? '1D' : '2D'} run does not have`
     : noTemp ? 'This equation of state fixes the pressure of the gas, so a star’s cannot be chosen' : '';
   if (noStar && tool === 'star') tool = null;
   const noField = !cfg?.problem.mhd;
   if (noField && tool !== null && FIELD_TOOLS.includes(tool)) tool = null;
   // The MHD fluxes know no solid cell (mhd/mhd.ts mhdUnsupported).
-  const noObstacle = cfg?.problem.mhd ? 'Obstacles are not available with a magnetic field yet' : '';
+  const noObstacle = cfg?.problem.mhd ? 'Obstacles are not available with a magnetic field yet' : cfg?.ndim === 1 ? 'Obstacles are not available in 1D yet (plans/one-dimensional.md, phase 12)' : '';
   if (noObstacle && tool === 'obstacle') tool = null;
+  // A point mass in 1D would be a sheet or a line: not one the run's gravity knows.
+  const noSink = cfg?.ndim === 1 ? 'Point masses are not available in 1D' : '';
+  if (noSink && tool === 'sink') tool = null;
   // A spherical run's cells are not along straight lines of the box.
   const noProfile = cfg && spherical(cfg) && cfg.ndim > 1 ? 'Profiles are not available on a spherical grid yet' : '';
   if (noProfile && tool === 'profile') tool = null;
@@ -641,8 +645,8 @@ function syncTools() {
     const b = $<HTMLButtonElement>(`tool-${t.kind}`);
     b.hidden = (noField && FIELD_TOOLS.includes(t.kind)) || (t.kind === 'star' && !!noStar);
     b.setAttribute('aria-pressed', String(tool === t.kind));
-    b.disabled = (t.kind === 'temperature' && noTemp) || (t.kind === 'star' && !!noStar) || (t.kind === 'obstacle' && !!noObstacle) || (t.kind === 'profile' && !!noProfile);
-    b.title = !b.disabled ? toolTitle(t) : t.kind === 'star' ? noStar : t.kind === 'obstacle' ? noObstacle : t.kind === 'profile' ? noProfile : 'This equation of state ties the temperature to the density';
+    b.disabled = (t.kind === 'temperature' && noTemp) || (t.kind === 'star' && !!noStar) || (t.kind === 'obstacle' && !!noObstacle) || (t.kind === 'profile' && !!noProfile) || (t.kind === 'sink' && !!noSink);
+    b.title = !b.disabled ? toolTitle(t) : t.kind === 'star' ? noStar : t.kind === 'obstacle' ? noObstacle : t.kind === 'profile' ? noProfile : t.kind === 'sink' ? noSink : 'This equation of state ties the temperature to the density';
   }
   canvas.classList.toggle('tool', tool !== null);
   // The tool's settings slide out under its own button, pushing the buttons below it down.
@@ -1866,11 +1870,17 @@ function build(problemId: string, n: number, ndim: 1 | 2 | 3, levels: number, ke
       next.fluff = { ...next.fluff, ...link.fluff };
       next.startDamping = { ...next.startDamping, ...link.startDamping };
       next.driving = { ...next.driving, ...link.driving };
-      if (ndim < 3) {
+      if (ndim === 2) {
         // (An axisymmetric or spherical run has the self-gravity of its rings or shells.)
         if (isSelfGravity(next.gravity) && problem.geometry !== 'cylindrical' && problem.geometry !== 'spherical') next.gravity = 'off';
         next.bcLo = [next.bcLo[0], next.bcLo[1], 0];
         next.bcHi = [next.bcHi[0], next.bcHi[1], 0];
+      } else if (ndim === 1) {
+        // (A 1D run keeps its self-gravity, a prefix sum; y and z are periodic but a spherical
+        // run's poles: configFor.)
+        const poles = problem.geometry === 'spherical';
+        next.bcLo = [next.bcLo[0], poles ? next.bcLo[1] : 0, 0];
+        next.bcHi = [next.bcHi[0], poles ? next.bcHi[1] : 0, 0];
       }
       Object.assign(view, link.view);
       if (link.auto === false) $<HTMLInputElement>('auto').checked = false;
@@ -3540,12 +3550,7 @@ function profilePoint(px: number, py: number, depth: number): Vec3 {
  * Any other run's line is as it was drawn.
  */
 function lockedLine(a: Vec3, b: Vec3, moving: 0 | 1 = 1, c: SimConfig = cfg): [Vec3, Vec3] {
-  if (c.ndim !== 1) return [a, b];
-  if (radialProfiles(c)) {
-    const outer = moving === 0 ? a : b;
-    return [[0, outer[1], 0], [outer[0], outer[1], 0]];
-  }
-  return moving === 1 ? [a, [b[0], a[1], 0]] : [[a[0], b[1], 0], b];
+  return lockLine(a, b, moving, c.ndim, radialProfiles(c));
 }
 /** A 1D spherical or axisymmetric run, whose profile lines are radial (lockedLine). */
 const radialProfiles = (c: SimConfig | undefined) => !!c && c.ndim === 1 && (c.problem.geometry === 'spherical' || c.problem.geometry === 'cylindrical');
@@ -4290,7 +4295,7 @@ function drawProfilePop() {
   const foot = profilePop.querySelector('.foot')!;
   const lu = u.label('length');
   const len = (v: number) => `${fmt3(v * ls)}${lu ? ` ${lu}` : ''}`;
-  const pos = (q: Vec3) => `(${(cfg.ndim === 3 ? [0, 1, 2] : [0, 1]).map((k) => fmt3(fracPos(cfg, q[k], k) * ls)).join(', ')})`;
+  const pos = (q: Vec3) => `(${[0, 1, 2].slice(0, cfg.ndim).map((k) => fmt3(fracPos(cfg, q[k], k) * ls)).join(', ')})`;
   let html: string;
   const several = profiles.length > 1;
   if (profileHover && series.length) {

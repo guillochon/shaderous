@@ -49,8 +49,9 @@ fn red_cell(c: vec3<i32>) -> Red {
   comp_use(comp_tex(a));
   let dx = blk_dx(slot);
   // (An axisymmetric run's cell is a ring of volume 2 pi R dx^2.)
-  var dv = select(dx * dx * dx, dx * dx, is2d());
-  if (cylindrical()) { dv = 6.2831853 * (f32(blk_coord(slot).x * BS + l.x) + 0.5) * dx * dx * dx; }
+  // (A 1D run's cell is per unit area across x: its reduction takes one row of each block.)
+  var dv = select(select(dx * dx * dx, dx * dx, is2d()), dx, is1d());
+  if (cylindrical()) { dv = 6.2831853 * (f32(blk_coord(slot).x * BS + l.x) + 0.5) * dx * dx * select(dx, 1.0, is1d()); }
   // (A spherical run's cell is a ring of volume 2 pi dr^3/3 dcos(theta): amr/grid.wgsl blk_sph_volume.)
   if (spherical()) { dv = blk_sph_volume(slot, l); }
   let rho = max(u1.x, P.rho_floor);

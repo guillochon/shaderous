@@ -101,7 +101,7 @@ fn face_weights(slot: i32, l: vec3<i32>, axis: i32) -> vec2<f32> {
   let gl = blk_coord(slot) * BS + l;
   if (cylindrical() && axis == 0) { return cyl_weights(gl.x); }
   if (spherical() && axis < 2) {
-    let g = sph_cell_g(gl.x, gl.y, blk_sph_grid(slot));
+    let g = sph_cell_g(gl.x, select(gl.y, 0, is1d()), blk_sph_grid(slot));
     return select(g.wt, g.wr, axis == 0);
   }
   return vec2<f32>(1.0);

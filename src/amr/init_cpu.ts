@@ -56,6 +56,13 @@ export function surfaceOf(fn: Setup, eos: Eos): (x: number, y: number, z: number
 }
 
 /**
+ * Where a 1D run's sixteen like rows of a block take the setup (plans/one-dimensional.md): on the
+ * line y = 0, or at a spherical run's equator (code y half the box: theta = pi / 2, as the
+ * uniform grid's one theta cell has it), so every row of a block starts the same.
+ */
+export const lineY = (c: SimConfig): number => (c.problem.geometry === 'spherical' ? c.problem.box / 2 : 0);
+
+/**
  * Samples per cell side when building the starting mesh: down to the finest level, within a
  * budget. A few blocks share a total budget per pass, so a deep mesh still sees a feature a few
  * finest cells across (a blast) that coarse sampling of a root block would step over; many
@@ -86,6 +93,8 @@ export function indicator(cfg: SimConfig, dx0: number, b: BlockAt, fn: (x: numbe
   const m = (BS + 2) * sub; // one cell of margin on each side
   const mz = three ? m : 1;
   const at = (i: number, a: number) => b.c[a] * BS * dx + (i - sub + 0.5) * h + lo[a];
+  // A 1D run's rows are all its line (lineY).
+  const yAt = (j: number) => (cfg.ndim === 1 ? lineY(cfg) : at(j, 1));
   // Gas dense enough that the preset wants it at the finest level (stars): as amr/flag.wgsl.
   // Any sample above it decides the block, so with several samples per cell one per cell is
   // looked at first (the cell-centered ones of the full sampling below): a block inside a star
@@ -95,7 +104,7 @@ export function indicator(cfg: SimConfig, dx0: number, b: BlockAt, fn: (x: numbe
     const first = sub >> 1;
     for (let k = three ? first : 0; k < mz; k += sub)
       for (let j = first; j < m; j += sub)
-        for (let i = first; i < m; i += sub) if (fn(at(i, 0), at(j, 1), three ? at(k, 2) : 0).rho > dense) return Infinity;
+        for (let i = first; i < m; i += sub) if (fn(at(i, 0), yAt(j), three ? at(k, 2) : 0).rho > dense) return Infinity;
   }
   const rho = new Float64Array(m * m * mz);
   const pr = new Float64Array(m * m * mz);
@@ -111,7 +120,7 @@ export function indicator(cfg: SimConfig, dx0: number, b: BlockAt, fn: (x: numbe
   for (let k = 0; k < mz; k++)
     for (let j = 0; j < m; j++)
       for (let i = 0; i < m; i++) {
-        const w = fn(at(i, 0), at(j, 1), three ? at(k, 2) : 0);
+        const w = fn(at(i, 0), yAt(j), three ? at(k, 2) : 0);
         if (dense > 0 && w.rho > dense) return Infinity;
         rho[(k * m + j) * m + i] = w.rho;
         pr[(k * m + j) * m + i] = w.p;
@@ -243,7 +252,8 @@ export function leafState(x: FillContext, b: BlockAt): LeafState {
   const radT = rad ? new Float32Array(blockCells) : null;
   const radGiven = rad ? new Uint8Array(blockCells) : null;
   const dx = x.dx0 / (1 << b.level);
-  const vol = dx ** c.ndim;
+  // (A 1D block's sixteen like rows are one row of cells: each counts for a sixteenth.)
+  const vol = c.ndim === 1 ? dx / BS : dx ** c.ndim;
   // A magnetic field: the leaf's faces, and their energy in each cell's total.
   const faces = x.mhd ? (blockFaces(c, b as never, x.dx0, x.levels) as Float32Array<ArrayBuffer>) : null;
   const W = BS + 1;
@@ -256,7 +266,7 @@ export function leafState(x: FillContext, b: BlockAt): LeafState {
   for (let k = 0; k < depth; k++)
     for (let j = 0; j < BS; j++)
       for (let i = 0; i < BS; i++, o += 4) {
-        const w = fn((b.c[0] * BS + i + 0.5) * dx + lo[0], (b.c[1] * BS + j + 0.5) * dx + lo[1], three ? (b.c[2] * BS + k + 0.5) * dx + lo[2] : 0);
+        const w = fn((b.c[0] * BS + i + 0.5) * dx + lo[0], c.ndim === 1 ? lineY(c) : (b.c[1] * BS + j + 0.5) * dx + lo[1], three ? (b.c[2] * BS + k + 0.5) * dx + lo[2] : 0);
         const p = pressureOf(eos, w);
         // Where the species set the equation of state, the cell's own.
         let ce = eos;

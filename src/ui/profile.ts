@@ -43,6 +43,21 @@ export function clipSegment(a0: readonly number[], b0: readonly number[], dims: 
 }
 
 /**
+ * A 1D run's profile line, made to go the one way that is not redundant (plans/one-dimensional.md):
+ * horizontal in a Cartesian run (the end that moved, `moving`, takes the other's y), radial in a
+ * spherical or axisymmetric one (`radial`: from the center out to the outer end, at its polar
+ * angle). Both are lines of constant y in the grid's fractions. Any other run's line is as drawn.
+ */
+export function lockLine(a: Vec3, b: Vec3, moving: 0 | 1, dims: 1 | 2 | 3, radial: boolean): [Vec3, Vec3] {
+  if (dims !== 1) return [a, b];
+  if (radial) {
+    const outer = moving === 0 ? a : b;
+    return [[0, outer[1] ?? 0.5, 0], [outer[0], outer[1] ?? 0.5, 0]];
+  }
+  return moving === 1 ? [a, [b[0], a[1] ?? 0.5, 0]] : [[a[0], b[1] ?? 0.5, 0], b];
+}
+
+/**
  * How many samples to take along a line `cells` cells of the finest level long: two a cell, held
  * between PROFILE_MIN_SAMPLES and PROFILE_DEFAULT_MAX, or `n` if given (2 to PROFILE_MAX_SAMPLES).
  */

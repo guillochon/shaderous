@@ -2,7 +2,9 @@
 // changes only when the grid is re-meshed, and is uploaded to the GPU as flat tables.
 //
 // The domain is covered by nr^ndim root blocks. Every block holds BS^ndim cells and may be
-// split into 2^ndim children of half the cell size. Leaves carry the solution; parents carry
+// split into 2^ndim children of half the cell size. (A 1D run's blocks are a row, each split in
+// two along x; the GPU lays each out as a 2D block of sixteen like rows, its own neighbor along
+// y: writeRow, plans/one-dimensional.md.) Leaves carry the solution; parents carry
 // nothing (coarse data next to a fine region is restricted on the fly from the children).
 // Face neighbors never differ by more than one level (2:1 balance). With `edgeBalance`, the
 // same holds for blocks that share only an edge (3D) or a vertex (2D): constrained transport
@@ -598,7 +600,9 @@ export class BlockTree {
     // new children would be filled from the old parent's slot, which holds no data.
     const evicted = new Set<Block>();
     const merge = (p: Block) => {
+      // (In 1D each child stands for both octants along y, as in the block table: writeRow.)
       const children = p.children!.map((ch) => ch.slot);
+      if (this.ndim === 1) children.push(...children);
       this.coarsen(p);
       touched.add(p);
       ops.set(p.slot, { kind: RG_RESTRICT, src: p.slot, octant: 0, children });
@@ -668,6 +672,9 @@ export class BlockTree {
         } else t[o + 6 + f] = -1 - nb.type;
       }
       if (b.children) b.children.forEach((ch, i) => (t[o + 12 + i] = ch.slot));
+      // A 1D run's block, laid out on the GPU as a 2D one of like rows: each child stands for
+      // both octants along y, so a lookup by a cell's octant finds it (amr/grid.wgsl is1d).
+      if (b.children && this.ndim === 1) b.children.forEach((ch, i) => (t[o + 14 + i] = ch.slot));
     }
   }
 
@@ -715,6 +722,29 @@ export class BlockTree {
     const m = this.nr << this.maxLevel;
     const d3 = this.ndim === 3;
     const mz = d3 ? m : 1;
+    // A 1D run's index is a row of m.
+    if (this.ndim === 1) {
+      let row = this.grid;
+      if (!row) {
+        row = this.grid = new Uint32Array(m);
+        for (const b of this.blocks.values()) if (!b.children) this.fillLeaf(row, b, m);
+        this.newLeaves = [];
+        boxes?.push({ o: [0, 0, 0], s: [m, 1, 1] });
+        return row;
+      }
+      let lo = m;
+      let hi = 0;
+      for (const b of this.newLeaves) {
+        if (b.children || this.slots[b.slot] !== b) continue;
+        this.fillLeaf(row, b, m);
+        const span = 1 << (this.maxLevel - b.level);
+        lo = Math.min(lo, b.c[0] * span);
+        hi = Math.max(hi, (b.c[0] + 1) * span);
+      }
+      this.newLeaves = [];
+      if (boxes && hi > lo) boxes.push({ o: [lo, 0, 0], s: [hi - lo, 1, 1] });
+      return row;
+    }
     // Every cell lies in exactly one leaf, so filling the new leaves covers whatever changed.
     let g = this.grid;
     if (!g) {
@@ -774,6 +804,7 @@ export class BlockTree {
 
   private fillLeaf(g: Uint32Array, b: Block, m: number) {
     const span = 1 << (this.maxLevel - b.level);
+    if (this.ndim === 1) return void g.fill(b.slot, b.c[0] * span, (b.c[0] + 1) * span);
     const z0 = this.ndim === 3 ? b.c[2] * span : 0;
     for (let k = z0; k < z0 + (this.ndim === 3 ? span : 1); k++)
       for (let j = b.c[1] * span; j < (b.c[1] + 1) * span; j++)

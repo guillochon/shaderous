@@ -40,7 +40,7 @@ import { writeDrive } from '../hydro/drive';
 import { gridDims } from '../domain';
 import { sphSetup, spherical } from '../spherical';
 import { FORCE_CHANNELS, forcesOn, WallForces } from '../hydro/forces';
-import { implicitPressure, rotationOf, orbitConfig, settledOrbit, MASS_TRACK_BYTE, clockPressure, implicitBlocksUnsupported, refusal, CLOCK_BYTES, CLOCK_HOLD_BYTE, clockState, syncScale, cosmologyOf, withScale, cosmologyUnsupported, shearUnsupported, cylindrical, cylindricalUnsupported, sphericalUnsupported, symmetryUnsupported, mirrors, unfoldDiagnostics, type CellProbe, type DisplayAtlas, readTexels, readStencil, writeTracerFixed, completeMass, MassReader, MAX_MASSES, BRUSH_BYTES, DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, withForces, FORCE_FLOAT, hydroSlots, initialMasses, MASS_FLOATS, MASS_HEADER, MASS_STRIDE, MAX_SOURCES, frameTrack, followsBinary, frameZeros, FRAME_SUMS, outlineContains, packBrush, packMasses, packParams, packSources, PARAM_BYTES, readRestart, SOURCE_BYTES, type RestartState, type BrushOp, type Diagnostics, type Outline, type SimConfig, type Simulation, type SourceSpec, writeMassRadii, burnSpec, noHeat, isFieldBrush, fieldBrushSteps } from '../sim';
+import { lineGravity, implicitPressure, rotationOf, orbitConfig, settledOrbit, MASS_TRACK_BYTE, clockPressure, implicitBlocksUnsupported, refusal, CLOCK_BYTES, CLOCK_HOLD_BYTE, clockState, syncScale, cosmologyOf, withScale, cosmologyUnsupported, shearUnsupported, cylindrical, cylindricalUnsupported, sphericalUnsupported, symmetryUnsupported, mirrors, unfoldDiagnostics, type CellProbe, type DisplayAtlas, readTexels, readStencil, writeTracerFixed, completeMass, MassReader, MAX_MASSES, BRUSH_BYTES, DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, withForces, FORCE_FLOAT, hydroSlots, initialMasses, MASS_FLOATS, MASS_HEADER, MASS_STRIDE, MAX_SOURCES, frameTrack, followsBinary, frameZeros, FRAME_SUMS, outlineContains, packBrush, packMasses, packParams, packSources, PARAM_BYTES, readRestart, SOURCE_BYTES, type RestartState, type BrushOp, type Diagnostics, type Outline, type SimConfig, type Simulation, type SourceSpec, writeMassRadii, burnSpec, noHeat, isFieldBrush, fieldBrushSteps } from '../sim';
 import { blockTier, type Zone } from './zones';
 import { BlockTree, BS, BT_STRIDE, NG, PAD, RG_STRIDE, type Block, gridBox, type GridBox, type RegridOp, type AdaptStep } from './tree';
 import { indicator, leafState, samplesPerCell, surfaceOf, type LeafState } from './init_cpu';
@@ -124,7 +124,8 @@ const MAX_TIME_BINS_SELF_GRAVITY = 4;
 const BIN_ARGS_BYTES = 256;
 const ARG = (i: number) => 12 * i;
 /** Workgroups per block of a flat dispatch (amr/list.wgsl, inv_flat) out to `reach` ghost layers. */
-const flatGroups = (ndim: number, reach: number) => Math.ceil((BS + 2 * reach) ** ndim / 64);
+// (A 1D run's blocks are laid out as 2D ones, sixteen like rows each: plans/one-dimensional.md.)
+const flatGroups = (ndim: number, reach: number) => Math.ceil((BS + 2 * reach) ** Math.max(ndim, 2) / 64);
 const BIN_TOTALS = 60;
 /** The first line of a (GPU error) message. */
 const firstLine = (s: string) => s.split(/\r?\n/)[0];
@@ -570,7 +571,7 @@ export class AmrSim implements Simulation {
     writeDrive(d, cfg.driving, cfg.ndim, cfg.problem.box);
     this.speciesGroups = speciesGroups(cfg.problem);
     this.n = cfg.n;
-    this.nz = cfg.ndim === 2 ? 1 : cfg.n;
+    this.nz = cfg.ndim < 3 ? 1 : cfg.n;
     this.levels = cfg.amrLevels;
     this.n0 = cfg.n >> this.levels;
     if (this.n0 % BS !== 0 || this.n0 < BS) throw new Error(`the coarsest level needs a multiple of ${BS} cells per side (got ${this.n0})`);
@@ -580,7 +581,7 @@ export class AmrSim implements Simulation {
     // Default size: what refining everywhere would need (leaves plus their parents), within the
     // device's GPU memory budget (atlasShape). create() falls back to a smaller atlas if the GPU
     // cannot hold that.
-    const full = Math.ceil(roots * (1 << (cfg.ndim * this.levels)) * (cfg.ndim === 3 ? 8 / 7 : 4 / 3));
+    const full = Math.ceil(roots * (1 << (cfg.ndim * this.levels)) * (cfg.ndim === 3 ? 8 / 7 : cfg.ndim === 2 ? 4 / 3 : 2));
     const explicit = slots || cfg.amrBudget;
     const fit = AmrSim.atlasLimits(d, {
       ndim: cfg.ndim,
@@ -605,7 +606,7 @@ export class AmrSim implements Simulation {
     noteAllocation(this.cap * AmrSim.blockBytesFor(cfg));
 
     const side = this.slotsPerSide * PAD;
-    const t = (label: string) => tex3d(d, side, 'rgba32float', label, this.layers * (cfg.ndim === 2 ? 1 : PAD));
+    const t = (label: string) => tex3d(d, side, 'rgba32float', label, this.layers * (cfg.ndim < 3 ? 1 : PAD));
     // View only: what the steps alone use is one texel, so its bindings stay valid (viewBlockBytes).
     const view = cfg.viewOnly;
     const st = (label: string) => (view ? tex3d(d, 1, 'rgba32float', `${label} (view only: unused)`, 1) : t(label));
@@ -617,7 +618,7 @@ export class AmrSim implements Simulation {
       const a = this.slotsPerSide;
       this.bakedTex = d.createTexture({
         label: 'view only: the field shown',
-        size: [a * BS, a * BS, cfg.ndim === 2 ? this.layers : this.layers * BS],
+        size: [a * BS, a * BS, cfg.ndim < 3 ? this.layers : this.layers * BS],
         dimension: '3d',
         format: 'rg32float',
         usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_SRC,
@@ -626,7 +627,7 @@ export class AmrSim implements Simulation {
     this.pred = [st('PA'), st('PB')];
     const G = this.speciesGroups;
     if (G > 0) {
-      this.speciesDepth = this.layers * (cfg.ndim === 2 ? 1 : PAD);
+      this.speciesDepth = this.layers * (cfg.ndim < 3 ? 1 : PAD);
       // The groups stack along z, and past 2048 texels in further stacks along y (species/species.ts).
       const [, sy, sz] = speciesAtlasSize(side, side, this.speciesDepth, G);
       if (Math.max(sy, sz) > d.limits.maxTextureDimension3D) {
@@ -648,11 +649,12 @@ export class AmrSim implements Simulation {
           : { lo: { buffer: this.massFlux, offset: 0, size: window }, hi: { buffer: this.massFlux, offset: window, size: bytes - window }, split: window / 4 };
     }
     // Burning: each texel's heating rate over the last step (burn/burn.ts); else one texel of nothing.
-    this.heat = burnSpec(cfg) ? tex3d(d, side, 'r32float', 'nuclear heating', this.layers * (cfg.ndim === 2 ? 1 : PAD)) : noHeat(d);
+    this.heat = burnSpec(cfg) ? tex3d(d, side, 'r32float', 'nuclear heating', this.layers * (cfg.ndim < 3 ? 1 : PAD)) : noHeat(d);
     const m = nr << this.levels;
     this.idx = d.createTexture({
       label: 'leaf index',
-      size: [m, m, cfg.ndim === 3 ? m : 1],
+      // (A 1D run's is a row: its side, m, is within a 3D texture's 2048 up to 32768 cells.)
+      size: [m, cfg.ndim === 1 ? 1 : m, cfg.ndim === 3 ? m : 1],
       dimension: '3d',
       format: 'r32uint',
       // COPY_SRC: re-meshing a magnetic field reads the old index (mhd/amr_regrid.wgsl).
@@ -712,7 +714,7 @@ export class AmrSim implements Simulation {
     // on NVIDIA; see tex3d in gpu/device.ts): a 35^3-block atlas's 5.5 GB textures lost the
     // device. Each atlas texture holds PAD^d texels of 16 bytes per block; the species' one
     // stacks its groups along z.
-    if (!rendersTo3d(d)) fit = Math.min(fit, Math.floor(d.limits.maxBufferSize / (PAD ** ndim * 16 * Math.max(1, groups))));
+    if (!rendersTo3d(d)) fit = Math.min(fit, Math.floor(d.limits.maxBufferSize / (PAD ** Math.max(ndim, 2) * 16 * Math.max(1, groups))));
     return { blocks: Math.max(0, fit), groups };
   }
 
@@ -762,7 +764,7 @@ export class AmrSim implements Simulation {
     // block together.
     // (Burning, which needs species, adds its heating rate: 4 bytes a texel, counted with them.)
     const texel = 9 * 16 + 2 * 4 + (mhd ? MHD_BLOCK_BYTES : 0) + speciesGroups * 4 * 16 + (speciesGroups > 0 ? 4 : 0) + (speciesGroups > 0 && comp ? 16 : 0);
-    return PAD ** ndim * texel + (mhd ? registerBytes(ndim) : 0) + (speciesGroups > 0 ? speciesFaceBytes(ndim) : 0);
+    return PAD ** Math.max(ndim, 2) * texel + (mhd ? registerBytes(ndim) : 0) + (speciesGroups > 0 ? speciesFaceBytes(ndim) : 0);
   }
 
   /**
@@ -780,11 +782,11 @@ export class AmrSim implements Simulation {
     const groups = speciesGroups(cfg.problem);
     // Implicit pressure (amr/pressure.ts): six one-channel atlases, the state the step started
     // from (four channels), and a gas's switches (one).
-    const implicit = implicitPressure(cfg) ? (10 + (cfg.eos === 'liquid' ? 0 : 1)) * 4 * PAD ** cfg.ndim : 0;
+    const implicit = implicitPressure(cfg) ? (10 + (cfg.eos === 'liquid' ? 0 : 1)) * 4 * PAD ** Math.max(cfg.ndim, 2) : 0;
     // Radiation (amr/radiation.ts): its atlases, and the face mass fluxes if the species do not already record them.
     const rad = radiationOn(cfg) ? AmrRad.blockBytes(cfg.ndim) + (groups > 0 ? 0 : speciesFaceBytes(cfg.ndim)) : 0;
     // Forces on bodies (hydro/forces.ts): two four-channel atlases.
-    const walls = forcesOn(cfg) ? 2 * 16 * PAD ** cfg.ndim : 0;
+    const walls = forcesOn(cfg) ? 2 * 16 * PAD ** Math.max(cfg.ndim, 2) : 0;
     return AmrSim.blockBytes(cfg.ndim, cfg.problem.mhd !== undefined, groups, groups > 0 && problemCoefficients(cfg.problem, cfg.eosParams.gamma) !== null) + implicit + rad + walls;
   }
 
@@ -855,7 +857,7 @@ export class AmrSim implements Simulation {
     compileSetup(['adaptive', slots, deferUpdate, cfg]);
     const d = sim.device;
     const v = (t: GPUTexture) => t.createView();
-    const depth = cfg.ndim === 2 ? 1 : BS;
+    const depth = cfg.ndim < 3 ? 1 : BS;
     // Every pipeline is asked for before any is awaited, so the browser compiles them all at
     // once (gpu/device.ts). The hydro passes, the slowest, start first; buildHydro below finds
     // them compiled or compiling.
@@ -870,12 +872,13 @@ export class AmrSim implements Simulation {
     if (spec) sim.debrisBuf = new DebrisBuffers(d, spec);
     // 3D: self-gravity machinery is built for every run, so gravity can be switched on later.
     // 2D: for an axisymmetric (R, z) run with self-gravity (its solver's passes in their 2D form).
-    const flatGravity = cylindrical(cfg) && isSelfGravity(cfg.gravity);
+    // (A 1D run's is a prefix sum, the monopole passes': buildMonopole.)
+    const flatGravity = cylindrical(cfg) && cfg.ndim === 2 && isSelfGravity(cfg.gravity);
     const gravity = async () => {
       const u1 = [0, 1].map((p) => v(sim.state[p][0]));
       sim.redMp = await Multipoles.create(d, [sim.cap * BS, BS, depth], flatGravity ? 'amr/multipole_cyl.wgsl' : 'amr/multipole.wgsl', u1.map((t) => ({ 0: sim.params, 1: t, 30: sim.bt })), 'amr multipole', cfg.symmetry);
       sim.grav = await AmrGravity.create({
-        device: d, slotsPerSide: sim.slotsPerSide, flat: cfg.ndim === 2, layers: sim.layers, levels: sim.levels, params: sim.params, bt: sim.bt,
+        device: d, slotsPerSide: sim.slotsPerSide, flat: cfg.ndim < 3, layers: sim.layers, levels: sim.levels, params: sim.params, bt: sim.bt,
         listAll: sim.listAll, listLeaf: sim.listLeaf, listLevel: sim.listLevel, rg: sim.rg, clock: sim.clock, bh: sim.bh,
         multipole: sim.redMp.result, stateU1: [sim.state[0][0], sim.state[1][0]], gfield: sim.gfield,
         bins: sim.bins, listAct: sim.listAct, listUpd: sim.listUpd, binArgs: sim.binArgs,
@@ -913,7 +916,7 @@ export class AmrSim implements Simulation {
       computePipeline(d, assemble('gravity/bh_kick.wgsl'), 'point mass kick'),
       computePipeline(d, assemble('gravity/bh_kick.wgsl'), 'point mass accelerations', { LIVE: 0 }),
       // 2D without self-gravity, so no solver: the field atlas holds the point masses alone.
-      cfg.ndim === 2 && !flatGravity ? computePipeline(d, assemble('amr/gravity/field.wgsl', FIELD_SLOTS), 'amr point mass field') : undefined,
+      cfg.ndim < 3 && !flatGravity ? computePipeline(d, assemble('amr/gravity/field.wgsl', FIELD_SLOTS), 'amr point mass field') : undefined,
       spec ? computePipeline(d, assemble('debris/census_amr.wgsl'), 'amr debris census') : undefined,
       (cfg.ndim === 3 || flatGravity) && !cfg.viewOnly ? gravity() : undefined,
     ]);
@@ -926,7 +929,7 @@ export class AmrSim implements Simulation {
       sim.mhd = await AmrMhd.create({
         device: d, cfg, cap: sim.cap,
         texture: (label, format = 'rgba32float') =>
-          cfg.viewOnly && ((cfg.viewBaked && !cfg.viewFaces) || label !== 'face field 0') ? tex3d(d, 1, format, `${label} (view only: unused)`, 1) : tex3d(d, side, format, label, sim.layers * (cfg.ndim === 2 ? 1 : PAD)),
+          cfg.viewOnly && ((cfg.viewBaked && !cfg.viewFaces) || label !== 'face field 0') ? tex3d(d, 1, format, `${label} (view only: unused)`, 1) : tex3d(d, side, format, label, sim.layers * (cfg.ndim < 3 ? 1 : PAD)),
         prim: sim.prim,
         params: sim.params, clock: sim.clock, bt: sim.bt, listLeaf: sim.listLeaf, idx: sim.idx, rg: sim.rg, brush: sim.brush,
         state: sim.state, half: sim.pred, rates: sim.redDt.first, slots: sim.slots, gfield: sim.gfield, bh: sim.bh, massFlux: sim.massFluxWindows ?? undefined,
@@ -965,7 +968,7 @@ export class AmrSim implements Simulation {
     const kick = { 0: sim.params, 1: sim.clock, 2: sim.redBh.result, 3: sim.bh, 4: sim.redFrame?.result ?? sim.frameZeros! };
     sim.gBhKick = bindGroup(d, sim.pBhKick, kick);
     sim.gBhEval = bindGroup(d, sim.pBhEval, kick);
-    if (spherical(cfg) && (isSelfGravity(cfg.gravity) || (cfg.problem.masses?.(cfg.params, cfg.G, cfg.problem.box / cfg.n, cfg.ndim).length ?? 0) > 0)) await sim.buildMonopole();
+    if ((spherical(cfg) && (isSelfGravity(cfg.gravity) || (cfg.problem.masses?.(cfg.params, cfg.G, cfg.problem.box / cfg.n, cfg.ndim).length ?? 0) > 0)) || (cfg.ndim === 1 && isSelfGravity(cfg.gravity))) await sim.buildMonopole();
     if (sim.pMassField) {
       // The potential bindings are never read (there is none), but the pass declares them.
       sim.gMassField = bindGroup(d, sim.pMassField, {
@@ -1050,7 +1053,7 @@ export class AmrSim implements Simulation {
    * viscosity (43 KB) gathers instead.
    */
   private tileConstants(): Record<string, number> {
-    const flat = this.cfg.ndim === 2;
+    const flat = this.cfg.ndim < 3;
     const bytes = (flat ? 576 : 896) * (this.cfg.viscosity > 0 ? 48 : 32);
     const fits = bytes <= this.device.limits.maxComputeWorkgroupStorageSize;
     return { TILE: fits ? 1 : 0, TILE_2D: flat ? 1 : 0 };
@@ -1093,7 +1096,7 @@ export class AmrSim implements Simulation {
     // The diagnostics' reduction compiles alongside the hydro passes.
     const diag = Reducer.create(
       d,
-      [this.cap * BS, BS, this.cfg.ndim === 2 ? 1 : BS],
+      [this.cap * BS, this.cfg.ndim === 1 ? 1 : BS, this.cfg.ndim < 3 ? 1 : BS],
       DIAG_OPS,
       'amr/diagnostics.wgsl',
       slots,
@@ -1135,7 +1138,7 @@ export class AmrSim implements Simulation {
       const at = this.state[0][0];
       this.walls = await WallForces.create(
         d, (label) => tex3d(d, at.width, 'rgba32float', `amr ${label}`, at.depthOrArrayLayers, at.height), true, this.cfg.problem.bodies!,
-        [this.cap * BS, BS, this.cfg.ndim === 2 ? 1 : BS], 'amr/forces.wgsl', slots, this.params, { 30: this.bt },
+        [this.cap * BS, this.cfg.ndim === 1 ? 1 : BS, this.cfg.ndim < 3 ? 1 : BS], 'amr/forces.wgsl', slots, this.params, { 30: this.bt },
       );
     }
     if (implicitPressure(this.cfg)) {
@@ -1153,7 +1156,7 @@ export class AmrSim implements Simulation {
         massFlux: this.recordsMassFlux && this.massFluxWindows ? this.massFluxWindows : undefined,
         gas: this.faceVel ? { faceLo: this.faceVel[0], faceHi: this.faceVel[1], lag: this.lagP!, gfield: this.gfield, bh: this.bh } : undefined,
         flat: (pass, count, reach) => this.flat(pass, count, reach),
-        rootDims: [this.n0, this.n0, c.ndim === 2 ? 1 : this.n0], dx0: this.dx0, lo: c.bcLo.map(kind), hi: c.bcHi.map(kind),
+        rootDims: [this.n0, this.n0, c.ndim < 3 ? 1 : this.n0], dx0: this.dx0, lo: c.bcLo.map(kind), hi: c.bcHi.map(kind),
         interior: (pass, count) => this.interior(pass, count),
         ...(this.comp ? { comp: this.comp } : {}),
       });
@@ -1428,7 +1431,7 @@ export class AmrSim implements Simulation {
     await this.grav?.setBins();
     const v = (t: GPUTexture) => t.createView();
     this.redBhB ??= await MassSums.create(
-      d, MAX_MASSES, [this.cap * BS, BS, this.cfg.ndim === 2 ? 1 : BS], 'amr/bh_moment.wgsl', { bins: 'amr/bins_on.wgsl' },
+      d, MAX_MASSES, [this.cap * BS, this.cfg.ndim === 1 ? 1 : BS, this.cfg.ndim < 3 ? 1 : BS], 'amr/bh_moment.wgsl', { bins: 'amr/bins_on.wgsl' },
       [0, 1].map((p) => ({ 0: this.params, 1: v(this.state[p][0]), 2: this.bh, 3: v(this.state[p][1]), 4: this.clock, 29: A, 30: this.bt })), 'amr point masses (bins)',
     );
     this.gBhKickB = bindGroup(d, this.pBhKick!, { 0: this.params, 1: this.clock, 2: this.redBhB.result, 3: this.bh, 4: this.redFrame?.result ?? this.frameZeros! });
@@ -1658,7 +1661,8 @@ export class AmrSim implements Simulation {
   writeParams() {
     const c = orbitConfig(this.cfg, this.orbitOmega);
     const buf = packParams(c, {
-      dims: [this.n0, this.n0, c.ndim === 2 ? 1 : this.n0],
+      // (A 1D run's y has one cell, as a 2D run's z: hydro/common.wgsl grid_n, amr/grid.wgsl is1d.)
+      dims: [this.n0, c.ndim === 1 ? 1 : this.n0, c.ndim < 3 ? 1 : this.n0],
       dx: this.dx0,
       rhoMean: this.rhoMean,
       // Comoving coordinates: the state's scale factor as last read (syncScale keeps it current).
@@ -1697,12 +1701,14 @@ export class AmrSim implements Simulation {
   private async buildMonopole() {
     const d = this.device;
     const code = assemble('amr/sph_monopole.wgsl');
+    // (A 1D run's gravity too, by its geometry: sim.ts lineGravity.)
+    const LINE = this.cfg.ndim === 1 ? lineGravity(this.cfg) : 0;
     const [rows, shells, enclose, field, fieldNow] = await Promise.all([
-      computePipeline(d, code, 'spherical monopole rows', undefined, 'rows'),
-      computePipeline(d, code, 'spherical monopole shells', undefined, 'shells'),
-      computePipeline(d, code, 'spherical monopole enclose', undefined, 'enclose'),
-      computePipeline(d, code, 'spherical monopole field', undefined, 'field'),
-      computePipeline(d, code, 'spherical monopole field (now)', { HALF: 0 }, 'field'),
+      computePipeline(d, code, 'spherical monopole rows', { LINE }, 'rows'),
+      computePipeline(d, code, 'spherical monopole shells', { LINE }, 'shells'),
+      computePipeline(d, code, 'spherical monopole enclose', { LINE }, 'enclose'),
+      computePipeline(d, code, 'spherical monopole field', { LINE }, 'field'),
+      computePipeline(d, code, 'spherical monopole field (now)', { HALF: 0, LINE }, 'field'),
     ]);
     const n = this.n;
     const buf = d.createBuffer({ label: 'spherical monopole', size: 4 * (4 + 9 * n + 4 + this.cap * BS), usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
@@ -1934,7 +1940,8 @@ export class AmrSim implements Simulation {
       };
       // A rectangular grid (src/domain.ts gridDims): half the root blocks along a halved axis.
       const gd = gridDims(c);
-      const lim = [0, 1, 2].map((a) => (gd[a] * 2 === c.n ? this.n0 / BS / 2 : this.n0 / BS));
+      // (A 1D run's tree has one root along y and z: a row of blocks, each split in two.)
+      const lim = [0, 1, 2].map((a) => (a >= c.ndim ? 1 : gd[a] * 2 === c.n ? this.n0 / BS / 2 : this.n0 / BS));
       this.tree = new BlockTree(c.ndim, this.n0 / BS, this.levels, this.cap, c.bcLo, c.bcHi, c.problem.mhd !== undefined, lim);
       this.tree.levelLimit = limit;
       this.startTiers = keep;
@@ -2057,7 +2064,7 @@ export class AmrSim implements Simulation {
     if (this.selfGravity) {
       // The root level's potential from zero, not from the last run's (AmrGravity.clear).
       // (In 2D the corner's z is the slot's layer, which has no ghosts.)
-      const flat = this.cfg.ndim === 2;
+      const flat = this.cfg.ndim < 3;
       this.grav!.clear([...this.tree.lists().byLevel[0]].map((slot) => this.origin(slot).map((o, a) => (flat && a === 2 ? o : o - NG))));
     }
     if (this.fieldOn) {
@@ -2515,7 +2522,7 @@ export class AmrSim implements Simulation {
   /** Atlas texel of a slot's first interior cell. */
   private origin(slot: number): [number, number, number] {
     const a = this.slotsPerSide;
-    if (this.cfg.ndim === 2) return [(slot % a) * PAD + NG, (Math.floor(slot / a) % a) * PAD + NG, Math.floor(slot / (a * a))];
+    if (this.cfg.ndim < 3) return [(slot % a) * PAD + NG, (Math.floor(slot / a) % a) * PAD + NG, Math.floor(slot / (a * a))];
     return [(slot % a) * PAD + NG, (Math.floor(slot / a) % a) * PAD + NG, Math.floor(slot / (a * a)) * PAD + NG];
   }
 
@@ -2555,7 +2562,7 @@ export class AmrSim implements Simulation {
     d.queue.writeBuffer(this.listLeaf, 0, pack(leaves));
     // The leaves with a refined neighbor across a face, and the rest (pUpdatePlain).
     const t = this.tree.table();
-    const faces = this.cfg.ndim === 2 ? 4 : 6;
+    const faces = this.cfg.ndim < 3 ? 4 : 6;
     const refinedNext = (s: number) => {
       for (let f = 0; f < faces; f++) {
         const nb = t[s * BT_STRIDE + 6 + f];
@@ -2589,7 +2596,7 @@ export class AmrSim implements Simulation {
   // See amr/list.wgsl: in 2D each workgroup covers four blocks, and a long list is cut into
   // slabs along z, to stay within the workgroups a dispatch may have along an axis.
   private padded(pass: GPUComputePassEncoder, count: number) {
-    if (this.cfg.ndim === 2) {
+    if (this.cfg.ndim < 3) {
       const q = Math.ceil(count / 4);
       pass.dispatchWorkgroups(Math.min(q, SLAB_QUADS) * 3, 3, Math.ceil(q / SLAB_QUADS));
     } else pass.dispatchWorkgroups(...padded3d(count));
@@ -2599,7 +2606,7 @@ export class AmrSim implements Simulation {
     if (count > 0) pass.dispatchWorkgroups(flatGroups(this.cfg.ndim, reach), Math.min(count, FLAT_ROWS), Math.ceil(count / FLAT_ROWS));
   }
   private interior(pass: GPUComputePassEncoder, count: number) {
-    if (this.cfg.ndim === 2) {
+    if (this.cfg.ndim < 3) {
       const q = Math.ceil(count / 4);
       pass.dispatchWorkgroups(Math.min(q, SLAB_QUADS) * 2, 2, Math.ceil(q / SLAB_QUADS));
     } else pass.dispatchWorkgroups(...interior3d(count));
@@ -3738,10 +3745,10 @@ export class AmrSim implements Simulation {
 
   /** Display volume: the finest resolution, capped so it stays a reasonable texture. */
   get displayDims(): [number, number, number] {
-    const nd = Math.min(this.n, this.cfg.ndim === 2 ? 2048 : 256);
+    const nd = Math.min(this.n, this.cfg.ndim < 3 ? 2048 : 256);
     // Half along a halved axis of a rectangular grid (src/domain.ts gridDims).
     const h = this.halvedAxes();
-    return [h[0] ? nd / 2 : nd, h[1] ? nd / 2 : nd, this.cfg.ndim === 2 ? 1 : h[2] ? nd / 2 : nd];
+    return [h[0] ? nd / 2 : nd, this.cfg.ndim === 1 ? 1 : h[1] ? nd / 2 : nd, this.cfg.ndim < 3 ? 1 : h[2] ? nd / 2 : nd];
   }
   /** The mirrored axes halved on a rectangular grid (src/domain.ts gridDims). */
   halvedAxes(): boolean[] {
@@ -3799,7 +3806,7 @@ export class AmrSim implements Simulation {
       off += a.length;
     });
     for (let i = 0; i < n; i++) {
-      const b = this.tree.get(batch.levels[i], [batch.locations[3 * i], batch.locations[3 * i + 1], c.ndim === 2 ? 0 : batch.locations[3 * i + 2]]);
+      const b = this.tree.get(batch.levels[i], [batch.locations[3 * i], batch.locations[3 * i + 1], c.ndim < 3 ? 0 : batch.locations[3 * i + 2]]);
       if (!b || b.children) throw new Error(`the mesh has no leaf at level ${batch.levels[i]}, [${batch.locations.slice(3 * i, 3 * i + 3)}]`);
       inp[12 + i] = b.slot;
     }
@@ -3844,7 +3851,7 @@ export class AmrSim implements Simulation {
     const per = W * W * (c.ndim === 3 ? W : 1);
     const texels = new Float32Array(per * 4);
     for (let i = 0; i < batch.levels.length; i++) {
-      const b = this.tree.get(batch.levels[i], [batch.locations[3 * i], batch.locations[3 * i + 1], c.ndim === 2 ? 0 : batch.locations[3 * i + 2]]);
+      const b = this.tree.get(batch.levels[i], [batch.locations[3 * i], batch.locations[3 * i + 1], c.ndim < 3 ? 0 : batch.locations[3 * i + 2]]);
       if (!b || b.children) throw new Error(`the mesh has no leaf at level ${batch.levels[i]}, [${batch.locations.slice(3 * i, 3 * i + 3)}]`);
       for (let t = 0; t < per; t++) for (let a = 0; a < 3; a++) texels[4 * t + a] = batch.faces[3 * (i * per + t) + a];
       this.mhd.writeFaces(this.origin(b.slot), texels);
@@ -3909,7 +3916,7 @@ export class AmrSim implements Simulation {
    */
   private async readBoxes(tex: GPUTexture, blocks: Block[], channels: 1 | 4, w = BS, offset: readonly number[] = [0, 0, 0]): Promise<Float32Array> {
     const d = this.device;
-    const depth = this.cfg.ndim === 2 ? 1 : w;
+    const depth = this.cfg.ndim < 3 ? 1 : w;
     const rowBytes = w * channels * 4;
     const bytesPerRow = Math.ceil(rowBytes / 256) * 256;
     const perBlock = bytesPerRow * w * depth;
@@ -3945,11 +3952,19 @@ export class AmrSim implements Simulation {
     this.flush();
     const [a, b] = this.state[this.cur];
     const leaves = this.tree.leaves();
-    const u1 = await this.readBoxes(a, leaves, 4);
-    const u2 = await this.readBoxes(b, leaves, 4);
+    let u1 = await this.readBoxes(a, leaves, 4);
+    let u2 = await this.readBoxes(b, leaves, 4);
     const three = this.cfg.ndim === 3;
     const depth = three ? BS : 1;
-    const count = leaves.length * BS * BS * depth;
+    // A 1D run's block is sixteen like rows: its first is the block (plans/one-dimensional.md).
+    const line = this.cfg.ndim === 1;
+    if (line) [u1, u2] = [u1, u2].map((f) => {
+      const out = new Float32Array(leaves.length * BS * 4);
+      for (let i = 0; i < leaves.length; i++) out.set(f.subarray(i * BS * BS * 4, i * BS * BS * 4 + BS * 4), i * BS * 4);
+      return out;
+    });
+    const rows = line ? 1 : BS;
+    const count = leaves.length * BS * rows * depth;
     const out: LeafCells = {
       x: new Float32Array(count), y: new Float32Array(count), z: new Float32Array(count), dx: new Float32Array(count),
       u1, u2, count,
@@ -3959,10 +3974,10 @@ export class AmrSim implements Simulation {
     for (const blk of leaves) {
       const dx = this.dx0 / (1 << blk.level);
       for (let k = 0; k < depth; k++)
-        for (let j = 0; j < BS; j++)
+        for (let j = 0; j < rows; j++)
           for (let i = 0; i < BS; i++, q++) {
             out.x[q] = (blk.c[0] * BS + i + 0.5) * dx + lo[0];
-            out.y[q] = (blk.c[1] * BS + j + 0.5) * dx + lo[1];
+            out.y[q] = line ? 0 : (blk.c[1] * BS + j + 0.5) * dx + lo[1];
             out.z[q] = three ? (blk.c[2] * BS + k + 0.5) * dx + lo[2] : 0;
             out.dx[q] = dx;
           }
@@ -4050,7 +4065,7 @@ export class AmrSim implements Simulation {
     pass.end();
     d.queue.submit([enc.finish()]);
     const side = this.slotsPerSide * PAD;
-    const depthTex = this.cfg.ndim === 2 ? this.layers : side;
+    const depthTex = this.cfg.ndim < 3 ? this.layers : side;
     const f1 = await readTexture(d, this.state[1 - p][0], side, 4, depthTex);
     const f2 = await readTexture(d, this.state[1 - p][1], side, 4, depthTex);
     const three = this.cfg.ndim === 3;
@@ -4125,9 +4140,9 @@ export class AmrSim implements Simulation {
     const bins = await this.readBins();
     const worst: string[] = [];
     const side = this.slotsPerSide * PAD;
-    const depth = this.layers * (this.cfg.ndim === 2 ? 1 : PAD);
+    const depth = this.layers * (this.cfg.ndim < 3 ? 1 : PAD);
     const f = await this.mhd!.readAtlas(this.cur, side, depth);
-    const flat = this.cfg.ndim === 2;
+    const flat = this.cfg.ndim < 3;
     const at = (slot: number, l: number[], a: number) => {
       const o = this.origin(slot);
       const x = o[0] + l[0];
@@ -4211,7 +4226,7 @@ export class AmrSim implements Simulation {
    */
   async leafFaces(leaves: Block[]): Promise<Float32Array[]> {
     const W = BS + 1;
-    const per = W * W * (this.cfg.ndim === 2 ? 1 : W) * 4;
+    const per = W * W * (this.cfg.ndim < 3 ? 1 : W) * 4;
     const f = await this.readBoxes(this.mhd!.faces[this.cur], leaves, 4, W);
     return leaves.map((_, i) => f.subarray(i * per, (i + 1) * per));
   }

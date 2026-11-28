@@ -25,6 +25,14 @@ fn bt(slot: i32, k: u32) -> i32 {
 fn is2d() -> bool {
   return P.dims.z == 1u;
 }
+// A 1D run (plans/one-dimensional.md): one cell along y as well (P.dims.y). Its blocks are laid
+// out as 2D ones, sixteen like rows each, each block its own neighbor along y (the block table,
+// amr/tree.ts writeRow): every row computes the same bits, and the y fluxes cancel. Each child's
+// slot stands for both octants along y (writeRow), as a 1D block splits along x alone. Positions
+// lie on y = 0, and a spherical run's theta is its one cell on every row.
+fn is1d() -> bool {
+  return P.dims.y == 1u;
+}
 // n, as a loop bound the shader compiler cannot see through (P.dims.x is never 0): it then keeps
 // the loop a loop. A large function called in a loop is compiled into it once; unrolled, or
 // called at several places, it is inlined at every one (the MHD block passes took seconds to
@@ -50,17 +58,19 @@ fn blk_sph_grid(slot: i32) -> SphGrid {
 }
 fn blk_sph(slot: i32, l: vec3<i32>) -> SphCell {
   let g = blk_coord(slot) * BS + l;
-  return sph_cell_g(g.x, g.y, blk_sph_grid(slot));
+  return sph_cell_g(g.x, select(g.y, 0, is1d()), blk_sph_grid(slot));
 }
 fn blk_sph_volume(slot: i32, l: vec3<i32>) -> f32 {
   let g = blk_coord(slot) * BS + l;
-  return sph_volume_g(g.x, g.y, blk_sph_grid(slot), blk_dx(slot));
+  return sph_volume_g(g.x, select(g.y, 0, is1d()), blk_sph_grid(slot), blk_dx(slot));
 }
 // The four children of the cell at global index pg of level pl: (the radial pair's volumes,
 // the polar pair's dcos), for volume-weighted restriction and prolongation.
 fn sph_children(pl: i32, pg: vec2<i32>) -> vec4<f32> {
   let q = sph_level(i32(P.amr.z) - pl - 1);
   let c = 2 * pg;
+  // (A 1D run's theta is not split: its two "rows" of children are the same cell.)
+  if (is1d()) { return vec4<f32>(sph_v3(c.x, q), sph_v3(c.x + 1, q), 1.0, 1.0); }
   return vec4<f32>(sph_v3(c.x, q), sph_v3(c.x + 1, q), sph_dcos(c.y, q), sph_dcos(c.y + 1, q));
 }
 // Child (i, j) of cell l of block `slot`: its weight in the parent's volume-weighted mean against
@@ -85,6 +95,7 @@ fn sph_fine_face(slot: i32, l: vec3<i32>, axis: i32, src: i32, a: vec3<i32>) -> 
   var w0 = 0.0;
   var w1 = 0.0;
   var hi = false;
+  if (axis == 0 && is1d()) { return 1.0; }
   if (axis == 0) {
     w0 = sph_dcos(cg.y, q);
     w1 = sph_dcos(cg.y + 1, q);
@@ -136,6 +147,7 @@ fn atl(o: vec3<i32>, l: vec3<i32>) -> vec3<i32> {
 fn blk_pos(slot: i32, l: vec3<i32>) -> vec3<f32> {
   var x = (vec3<f32>(blk_coord(slot) * BS + l) + 0.5) * blk_dx(slot) + P.org.xyz;
   if (is2d()) { x.z = 0.0; }
+  if (is1d()) { x.y = 0.0; }
   return x;
 }
 

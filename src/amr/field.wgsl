@@ -148,6 +148,8 @@ struct Leaf {
 fn leaf_at(frac0: vec3<f32>) -> Leaf {
   var frac = frac0;
   if (is2d()) { frac.z = 0.0; }
+  // (A 1D run's leaf index is a row, and its blocks' rows are all alike: the first.)
+  if (is1d()) { frac.y = 0.0; }
   let m = i32(P.amr.y << P.amr.z);
   let slot = i32(textureLoad(IDX, vec3<i32>(frac * f32(m)), 0).x);
   g_dx = blk_dx(slot);
@@ -207,7 +209,8 @@ fn plane(ij: vec2<i32>, ab: vec2<i32>, axis: i32) -> Plane {
   let f = leaf_at(p);
   // Position within the block, in texels of the map.
   let within = (p * f32(f.nblk) - vec3<f32>(blk_coord(f.slot))) * side / (f32(f.nblk) * s);
-  let edge = select(0.0, 1.0, within[ab.x] < 1.0 || within[ab.y] < 1.0);
+  // (A 1D run's blocks are bounded along x alone: their edges are lines across the repeat.)
+  let edge = select(0.0, 1.0, within[ab.x] < 1.0 || (within[ab.y] < 1.0 && !is1d()));
   return Plane(leaf_value(f), edge, side / f32(f.nblk * BS));
 }
 

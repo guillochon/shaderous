@@ -23,6 +23,8 @@ fn red_cell(c: vec3<i32>) -> Red {
   comp_use(comp_tex(c));
   // (An axisymmetric run's cell is a ring: its true volume, 2 pi R dx^2, so masses are true ones.)
   var dv = select(P.geom.x, 6.2831853 * (f32(c.x) + 0.5) * P.dx * P.dx * P.dx, cylindrical());
+  // (A 1D axisymmetric run's ring is per unit length, as its mass: plans/one-dimensional.md.)
+  if (cylindrical() && P.dims.y == 1u) { dv /= P.dx; }
   // (A spherical run's cell is a ring too, of volume 2 pi dr^3/3 dcos(theta): sph_volume.)
   if (spherical()) { dv = sph_volume(c.x, c.y); }
   // A partly filled cell holds gas in its share of the volume (hydro/cut.ts).

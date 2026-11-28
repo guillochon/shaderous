@@ -1,9 +1,52 @@
 # Plan: one-dimensional runs
 
-Status (2026-11-27): planned, nothing built. Open questions of the first draft answered: the
-profile tool is locked to radial lines in spherical and cylindrical 1D runs, the cylindrical
-view is a half-disk like the spherical one, and the 1D chip alone marks the view. Every physics
-module is now in the plan, most as later phases.
+Status (2026-11-27): phases 1 to 5 built; 6 to 14 not started. Open questions of the first
+draft answered: the profile tool is locked to radial lines in spherical and cylindrical 1D runs,
+the cylindrical view is a half-disk like the spherical one, and the 1D chip alone marks the view.
+
+**As built, phases 1 to 5.**
+
+- **Uniform grid** (decisions 1, 3): `ndim` is `1 | 2 | 3`; a 1D grid is `n x 1 x 1`
+  (`gridDims`), y and z periodic (a spherical run's poles kept), each cell its own neighbor across
+  them, so the y fluxes cancel and the shaders were not changed to skip them: every cell of a 1D
+  run goes through the boundary-mapped pass (`region_pass.ts`), and `grid_n()` has one cell
+  along y. Workgroups along the row (64 x 1). Uniform 1D grids go up to 2048 cells, a 3D
+  texture's side; finer ones are adaptive, up to 32768 (the leaf index is a row of the same cap).
+- **Blocks: not decision 2 as written.** A 1D block is laid out on the GPU as a 2D one, sixteen
+  like rows, each block its own neighbor along y (the block table's y faces hold its own slot)
+  and each child's slot written for both octants along y (`tree.ts writeRow`, `regridTable`).
+  Every row computes the same bits, so the 2D block shaders run unchanged but for: positions on
+  y = 0 (`blk_pos`), a spherical run's one theta cell on every row (`blk_sph`,
+  `sph_children`, `sph_fine_face`), the leaf index a row (`indexGrid`, `leaf_at`), and one row
+  of each block in the reductions, the readback and the monopole. The tree is truly binary
+  (`nchild` 2, two faces). The cost is sixteen times the cells a block of one row would compute;
+  true `BS x 1` blocks remain a later option (phase 14), and only matter for speed.
+- **View** (decisions 4 to 6): the slice map is one texel tall and repeated by the slice shader;
+  spherical and 1D axisymmetric runs are the half-disk (`curvedView`; the axisymmetric one with
+  no inner radius, `sphViewParam` 1e-30). The chip is over the view (`#oned-chip`) and painted on
+  screenshots and movies whatever overlays are asked for (`paintChip`). The HUD and the Setup
+  dialog say `1D, 4096 cells`; the query readout and the profile caption give x (or r) alone.
+- **Profile tool** (decision 7): `lockLine` in `ui/profile.ts`; a click places a radial line; the
+  link's `prof` is `x0,x1` in 1D (`x0,y0,x1,y1` read too).
+- **Gravity** (phase 5): constant gravity along -x; self-gravity by the monopole passes with a
+  `LINE` mode (`gravity/sph_monopole.wgsl`, `amr/sph_monopole.wgsl`, `sim.ts lineGravity`): the
+  spherical monopole, Cartesian slabs (the 1D Green's function, isolated or periodic with the
+  mean taken out) and axisymmetric rings. The option table allows self-gravity in 1D
+  (`gravity.grid`). Point masses only at a spherical run's center; stars not in 1D.
+- **Refused** (decision 8, `oneDimUnsupported` and the option table's `oneD.blocked`): everything
+  of phases 6 to 13, with the phase named; and the sink and obstacle tools.
+- **Checked in the page**: Sod at 1024 cells uniform and 4096 with 3 levels against the exact
+  plateau (p* 0.3031, u* 0.9274); Noh in all three geometries uniform and on blocks (post-shock
+  densities 4, 15.9, 63 against 4, 16, 64, pre-shock profiles as (1 + t/r)^(k-1)); the Jeans
+  wave's growth to t = 0.5 (amplitude 1.17% against 1.16% from linear theory, uniform and on
+  blocks); a uniform cylinder's gravitational energy, -pi^2 / 4 to five figures; 2D and 3D runs
+  on blocks unchanged. Unit tests: `tests/unit/one_d.test.ts`.
+- **Open**: refined cylindrical Noh at 4096 cells with 3 levels blew up once at t = 0.12 when it
+  was run in many short `run()` calls with diagnostics read in between, and not when run in long
+  calls (twice, identically); not found yet. Presets on in 1D: Sod (x), the Riemann problems,
+  strong shock, planar, cylindrical and spherical Noh, advection, Sedov, the spherical blast,
+  the uniform collapses, Coggeshall, Jeans and the second collapse. The atmosphere is not: its
+  faces along x are periodic, and a 1D atmosphere needs walls there.
 
 A run with `dim: 1`: the gas varies along one axis only. Cartesian runs vary along x; spherical
 runs along r (spherical symmetry); cylindrical runs along R (cylindrical symmetry, no z). Such

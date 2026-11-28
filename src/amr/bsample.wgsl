@@ -22,6 +22,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   if (any(gid >= m)) { return; }
   var frac = (vec3<f32>(gid) + 0.5) / vec3<f32>(m);
   if (is2d()) { frac.z = 0.0; }
+  if (is1d()) { frac.y = 0.0; }
   let roots = i32(P.amr.y << P.amr.z);
   let slot = i32(textureLoad(IDX, min(vec3<i32>(frac * f32(roots)), vec3<i32>(roots - 1)), 0).x);
   let ncell = i32(P.amr.y) * (1 << u32(bt(slot, 0u))) * BS;

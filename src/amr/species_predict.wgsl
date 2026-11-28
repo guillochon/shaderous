@@ -28,7 +28,7 @@ fn predict_x(slot: i32, l: vec3<i32>, mask: vec3<f32>) -> array<vec4<f32>, NG> {
   var hs = vec2<f32>(1.0);
   if (spherical()) {
     let gl = blk_coord(slot) * BS + l;
-    hs = sph_cell_g(gl.x, gl.y, blk_sph_grid(slot)).h;
+    hs = sph_cell_g(gl.x, select(gl.y, 0, is1d()), blk_sph_grid(slot)).h;
   }
   let nax = select(3, 2, is2d());
   for (var a = 0; a < nax; a++) {

@@ -179,6 +179,9 @@ export const FACTS: Record<string, { label: string; of: (s: SetupSpec) => Value;
   'parts.starLine': { label: 'A star or a point mass', of: (s) => (count(s, (p) => p.kind === 'star') > 0 || (count(s, (p) => p.kind === 'mass') > 0 && s.domain?.geometry !== 'spherical')) },
   // Space in three dimensions: a 3D grid, or a 2D one in (R, z), whose cells are rings.
   'domain.space3': { label: '3D, or an axisymmetric (R, z) or spherical (r, theta) run', of: (s) => (s.domain?.ndim ?? 3) === 3 || ['cylindrical', 'spherical'].includes(s.domain?.geometry ?? 'cartesian') },
+  // Where self-gravity is solved: in 3D, in 1D (a prefix sum, plans/one-dimensional.md), or in an
+  // axisymmetric or spherical 2D run.
+  'gravity.grid': { label: '3D or 1D, or an axisymmetric (R, z) or spherical (r, theta) run', of: (s) => (s.domain?.ndim ?? 3) !== 2 || ['cylindrical', 'spherical'].includes(s.domain?.geometry ?? 'cartesian') },
   'gravity.selfFlat': { label: 'Self-gravity', of: (s) => ['periodic', 'isolated'].includes(s.physics?.gravity ?? 'off') && !['cylindrical', 'spherical'].includes(s.domain?.geometry ?? 'cartesian') },
   'parts.starFlat': { label: 'A star', of: (s) => count(s, (p) => p.kind === 'star') > 0 && s.domain?.geometry !== 'cylindrical' },
   'domain.geometry': { label: 'Geometry', of: (s) => s.domain?.geometry ?? 'cartesian', say: (v) => (v === 'cylindrical' ? 'axisymmetric (R, z)' : String(v)) },
@@ -457,9 +460,9 @@ export const OPTIONS: Option[] = [
   { path: 'physics.gravity', label: 'Gravity', tip: 'Off, a uniform field, or the self-gravity of the gas. Point masses pull either way', page: 'gravity', apply: 'live', default: 'off', linkKey: 'gravity', cfg: 'gravity',
     control: pickOf(GRAVITY_MODES,
       { value: 'off', label: 'Off', tip: 'No gravity (point masses still pull)' },
-      { value: 'constant', label: 'Constant', tip: 'A uniform field of strength G pointing down: -y in 2D, -z in 3D', excludes: [{ fact: 'domain.geometry', is: 'spherical', reason: 'Not available in a spherical (r, theta) run: a uniform field has no place on its shells' }] },
-      { value: 'periodic', label: 'Self, periodic', tip: 'Self-gravity of the gas in a periodic box (3D only)', requires: [...IN_3D, { fact: 'bc.allPeriodic' }], excludes: [{ fact: 'parts.star', reason: 'Not available with a star: a star’s gravity is not periodic' }] },
-      { value: 'isolated', label: 'Self, isolated', tip: 'Self-gravity of the gas, isolated: the potential falls off outside the box (3D, or an axisymmetric (R, z) or spherical run)', requires: IN_SPACE, excludes: [{ fact: 'bc.periodic' }] },
+      { value: 'constant', label: 'Constant', tip: 'A uniform field of strength G pointing down: -x in 1D, -y in 2D, -z in 3D', excludes: [{ fact: 'domain.geometry', is: 'spherical', reason: 'Not available in a spherical (r, theta) run: a uniform field has no place on its shells' }] },
+      { value: 'periodic', label: 'Self, periodic', tip: 'Self-gravity of the gas in a periodic box (3D, or 1D Cartesian)', requires: [{ fact: 'domain.ndim', is: [1, 3] }, { fact: 'domain.curvilinear', is: false, reason: 'Not available in an axisymmetric or spherical run: its gravity is isolated' }, { fact: 'bc.allPeriodic' }], excludes: [{ fact: 'parts.star', reason: 'Not available with a star: a star’s gravity is not periodic' }] },
+      { value: 'isolated', label: 'Self, isolated', tip: 'Self-gravity of the gas, isolated: the potential falls off outside the box (3D or 1D, or an axisymmetric (R, z) or spherical run)', requires: [{ fact: 'gravity.grid' }], excludes: [{ fact: 'bc.periodic' }] },
     ) },
   { path: 'physics.G', label: 'G', tip: 'Gravitational constant in code units, or the strength of the uniform field. A setup with physical units may leave it to them', page: 'gravity', control: num(0, undefined, { factor: 1.5 }), apply: 'live', default: 1, linkKey: 'G', cfg: 'G' },
   { path: 'physics.gext', label: 'Uniform acceleration', tip: 'A uniform acceleration on the gas, besides the Constant field', page: 'gravity', control: { type: 'vec3' }, apply: 'restart', default: [0, 0, 0], excludes: [{ fact: 'domain.geometry', is: 'spherical', reason: 'Not available in a spherical (r, theta) run: a uniform field has no place on its shells' }] },

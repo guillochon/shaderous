@@ -10,6 +10,7 @@
   "blurb": "Linear growth of a self-gravitating density wave; delta grows as cosh(k c_s t).",
   "domain": {
     "box": 1,
+    "supports1d": true,
     "bc": { "lo": [0, 0, 0], "hi": [0, 0, 0] }
   },
   "physics": {

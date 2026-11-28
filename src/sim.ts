@@ -792,6 +792,17 @@ export function withSymmetry(cfg: SimConfig, want: readonly boolean[] | undefine
   return { ...cfg, symmetry: sym, bcLo, bcHi };
 }
 
+/**
+ * A 1D run's self-gravity (plans/one-dimensional.md), the LINE constant of the monopole passes
+ * (gravity/sph_monopole.wgsl, amr/sph_monopole.wgsl): 0 a spherical run's monopole, 1 a
+ * Cartesian run's slabs (isolated), 2 the same in a periodic box, 3 an axisymmetric run's rings.
+ */
+export function lineGravity(c: SimConfig): number {
+  if (c.problem.geometry === 'spherical') return 0;
+  if (c.problem.geometry === 'cylindrical') return 3;
+  return c.gravity === 'periodic' ? 2 : 1;
+}
+
 /** The run is axisymmetric, in (R, z) (Problem.geometry). */
 export const cylindrical = (c: SimConfig): boolean => c.problem.geometry === 'cylindrical' && c.ndim < 3;
 
@@ -852,7 +863,6 @@ export function refusal(c: SimConfig): string | null {
  */
 export function oneDimUnsupported(c: SimConfig): string | null {
   if (c.ndim !== 1) return null;
-  if (c.amrLevels > 0) return 'the adaptive mesh is not available in 1D yet (plans/one-dimensional.md, phase 3)';
   if (c.problem.shear) return 'a shearing box needs two axes';
   if (c.problem.disk) return 'a disk needs two axes';
   if (c.cutCells || c.problem.obstacleDistances) return 'partly filled cells and meshes do not apply in 1D';
@@ -865,6 +875,10 @@ export function oneDimUnsupported(c: SimConfig): string | null {
   if (implicitPressure(c) || c.eos === 'liquid') return 'implicit pressure and the liquid are not available in 1D yet (phase 11)';
   if (c.problem.bodies?.length || c.problem.moving?.length || c.problem.surfaces) return 'obstacles and moving bodies are not available in 1D yet (phase 12)';
   if (c.problem.debris) return 'debris and particles are not available in 1D yet (phase 13)';
+  // A point mass is a sheet across a Cartesian run and a line along an axisymmetric one: only a
+  // spherical run's, at its center, is one (sphericalUnsupported).
+  if (c.problem.geometry !== 'spherical' && (c.problem.masses?.(c.params, c.G, c.problem.box / c.n, c.ndim).length ?? 0) > 0) return 'point masses sit only at a spherical run’s center in 1D';
+  if ((c.problem.setup?.parts ?? []).some((p) => p.kind === 'star')) return 'stars are not available in 1D';
   return null;
 }
 
@@ -2311,9 +2325,9 @@ export class Sim implements Simulation {
       // (potential, multipoles) still exist; it is never dispatched.
       [sim.mg, sim.redDt] = await Promise.all([
         // (A spherical run's monopole writes the solver's potential textures in its place.)
-        // (A 1D run's self-gravity is a prefix sum, not this solver's: it keeps the placeholder,
-        // but a spherical run, whose monopole writes these textures.)
-        Multigrid.create(d, (cfg.ndim === 2 && !cylindrical(cfg) && !spherical(cfg)) || (cfg.ndim === 1 && !spherical(cfg)) ? 2 : [nx, ny, nz], cfg.problem.box, sim.params, [sim.state[0][0], sim.state[1][0]], cfg.symmetry, sim.clock, cylindrical(cfg) || spherical(cfg), energyCorrection(cfg)),
+        // (A 1D run's self-gravity is a prefix sum, gravity/sph_monopole.wgsl's, not this
+        // solver's: as a spherical run's monopole, it writes these textures in its place.)
+        Multigrid.create(d, cfg.ndim === 2 && !cylindrical(cfg) && !spherical(cfg) ? 2 : [nx, ny, nz], cfg.problem.box, sim.params, [sim.state[0][0], sim.state[1][0]], cfg.symmetry, sim.clock, cylindrical(cfg) || spherical(cfg), energyCorrection(cfg)),
         Reducer.create(
           d,
           [nx, ny, nz],
@@ -2355,9 +2369,10 @@ export class Sim implements Simulation {
     sim.gClock = bindGroup(d, sim.pClock, { 0: sim.params, 1: sim.redDt.result, 2: sim.clock, 3: sim.bh });
     sim.gClockPreview = bindGroup(d, sim.pClockPreview, { 0: sim.params, 1: sim.redDt.result, 2: sim.clockPreview, 3: sim.bh });
     sim.gField = bindGroup(d, sim.pField, { 0: sim.params, 1: v(phi), 2: v(sim.mg.phiOld), 3: v(sim.gfield), 4: sim.clock, 5: sim.mg.dtPrev });
-    if (spherical(cfg)) {
+    if (spherical(cfg) || (cfg.ndim === 1 && isSelfGravity(cfg.gravity))) {
       const code = assemble('gravity/sph_monopole.wgsl');
-      const [shells, enclose, field] = await Promise.all(['shells', 'enclose', 'field'].map((e) => computePipeline(d, code, `spherical monopole ${e}`, undefined, e)));
+      const line = { LINE: lineGravity(cfg) };
+      const [shells, enclose, field] = await Promise.all(['shells', 'enclose', 'field'].map((e) => computePipeline(d, code, `spherical monopole ${e}`, line, e)));
       const buf = d.createBuffer({ label: 'spherical monopole', size: 4 * (4 + 4 * n), usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
       const g = [0, 1].map((p) => [
         bindGroup(d, shells, { 0: sim.params, 1: v(sim.state[p][0]), 2: buf }),
@@ -3070,6 +3085,8 @@ export class Sim implements Simulation {
   private get selfGravity(): boolean {
     // (A spherical run's monopole holds its point masses' pull too.)
     if (spherical(this.cfg)) return isSelfGravity(this.cfg.gravity) || this.centralGM !== 0;
+    // (A 1D run's is a prefix sum: lineGravity.)
+    if (this.cfg.ndim === 1) return isSelfGravity(this.cfg.gravity);
     // (An axisymmetric run solves for its potential in (R, z): gravity/stencil.wgsl.)
     return isSelfGravity(this.cfg.gravity) && (this.cfg.ndim === 3 || cylindrical(this.cfg));
   }
