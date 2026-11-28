@@ -637,7 +637,7 @@ function syncTools() {
   const noField = !cfg?.problem.mhd;
   if (noField && tool !== null && FIELD_TOOLS.includes(tool)) tool = null;
   // The MHD fluxes know no solid cell (mhd/mhd.ts mhdUnsupported).
-  const noObstacle = cfg?.problem.mhd ? 'Obstacles are not available with a magnetic field yet' : cfg?.ndim === 1 ? 'Obstacles are not available in 1D yet (plans/one-dimensional.md, phase 12)' : '';
+  const noObstacle = cfg?.problem.mhd ? 'Obstacles are not available with a magnetic field yet' : '';
   if (noObstacle && tool === 'obstacle') tool = null;
   // A point mass in 1D would be a sheet or a line: not one the run's gravity knows.
   const noSink = cfg?.ndim === 1 ? 'Point masses are not available in 1D' : '';

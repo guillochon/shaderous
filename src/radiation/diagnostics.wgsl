@@ -29,7 +29,8 @@ fn red_cell(c: vec3<i32>) -> Red {
   let R = textureLoad(RR, c, 0);
   let flat = P.dims.z == 1u;
   let dv = P.geom.x;
-  let area = select(P.dx * P.dx, P.dx, flat);
+  // (A 1D run's faces are of unit area: its cells are per unit area across x.)
+  let area = select(select(P.dx * P.dx, P.dx, flat), 1.0, P.dims.y == 1u);
   let rho = max(u1.x, P.rho_floor);
   let T = eos_temperature(rho, u2.y);
   let r = rad_reduction(kappa_rosseland(rho, T) * rho * P.dx);

@@ -36,7 +36,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let x = textureLoad(RA, atl(o, lc), 0);
     let off = vec3<f32>(l & vec3<i32>(1)) - 0.5;
     u = textureLoad(RI, atl(o, lc), 0);
-    let axes = select(3, 2, is2d());
+    let axes = blk_axes();
     for (var a = 0; a < axes; a++) {
       var e = vec3<i32>(0);
       e[a] = 1;
@@ -52,11 +52,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let nz = select(2, 1, is2d());
     u = vec4<f32>(0.0);
     for (var k = 0; k < nz; k++) {
-      for (var j = 0; j < 2; j++) {
+      for (var j = 0; j < kids_y(); j++) {
         for (var i = 0; i < 2; i++) { u += textureLoad(RI, atl(o, f + vec3<i32>(i, j, k)), 0); }
       }
     }
-    u *= select(0.125, 0.25, is2d());
+    u *= kids_w();
   } else {
     u = textureLoad(RI, atl(blk_origin(src), l), 0);
   }

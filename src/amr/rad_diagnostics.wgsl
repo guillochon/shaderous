@@ -22,8 +22,9 @@ fn red_cell(c: vec3<i32>) -> Red {
   comp_use(comp_tex(a));
   let R = textureLoad(RR, a, 0);
   let dx = blk_dx(slot);
-  let dv = select(dx * dx * dx, dx * dx, is2d());
-  let area = select(dx * dx, dx, is2d());
+  // (A 1D run's cells are per unit area across x, and their faces are of unit area.)
+  let dv = select(select(dx * dx * dx, dx * dx, is2d()), dx, is1d());
+  let area = select(select(dx * dx, dx, is2d()), 1.0, is1d());
   let rho = max(u1.x, P.rho_floor);
   let T = eos_temperature(rho, u2.y);
   let r = rad_reduction(kappa_rosseland(rho, T) * rho * dx);
@@ -31,7 +32,7 @@ fn red_cell(c: vec3<i32>) -> Red {
   let f = select(0.0, length(R.yzw) / (rad_c() * E), E > 0.0);
   var lum = 0.0;
   for (var k = 0; k < 3; k++) {
-    if (k == 2 && is2d()) { break; }
+    if (k >= blk_axes()) { break; }
     if (l[k] == 0) {
       let nb = bt(slot, 6u + u32(2 * k));
       if (nb == -2 || nb == -4) { lum += max(-R.yzw[k], 0.0) * area; }

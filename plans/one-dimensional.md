@@ -1,8 +1,49 @@
 # Plan: one-dimensional runs
 
-Status (2026-11-27): phases 1 to 8 built (8 as comoving coordinates alone); 9 to 14 not started. Open questions of the first
+Status (2026-11-27): phases 1 to 12 built (8 as comoving coordinates alone; 9 and 11 on the
+uniform grid alone); 13 does not apply; 14 left for later. Open questions of the first
 draft answered: the profile tool is locked to radial lines in spherical and cylindrical 1D runs,
 the cylindrical view is a half-disk like the spherical one, and the 1D chip alone marks the view.
+
+**As built, phases 9 to 14.**
+
+- **Magnetic fields** (phase 9): on the uniform grid, up to 2048 cells, without refinement. The
+  constrained transport needs no change: each cell is its own neighbor along y and z, so the y
+  and z face fields are one value a cell and Bx stays exactly constant. The 1D Alfven wave sets
+  its field on the faces (`flows/mhd.ts`: a vector potential can give no uniform Bx in 1D), one
+  wavelength across the box. On one-row blocks it is refused (`sim.ts oneDimUnsupported`, the
+  option table's `oneD.blocksOnly`): the block MHD passes address y in some eighty places.
+  Checked: Brio-Wu at 1024 cells and t = 0.1 gives rho 0.697, p 0.514, vx 0.596, vy -1.58 on the
+  compound wave's plateau, as published; the Alfven wave returns after one period. Presets:
+  `brio-wu`, `alfven-wave` (and `riemann-slow-shock`, already on).
+- **Radiation** (phase 10): on both grids. The block passes reach along x alone (`blk_axes`,
+  `kids_y` in restriction, one fine face per coarse one), a 1D cell is per unit area across x
+  and its faces of unit area (the luminosity and escape tallies, uniform and on blocks), and the
+  first radiation flux on blocks is built over one row (`init_cpu.ts`). Checked: the radiative
+  shock's energy is 4.2524 in 1D at 1024 cells against 4.2540 in 2D, 4.2528 on 4096 cells of
+  blocks and 4.2527 with two levels, each with rho 2.326 and T 2.127 behind the front; the
+  radiating sphere, the supercritical shock and the radiation-dominated Sedov blasts run, the
+  last with the same escaped energy on both grids. Presets: `radiative-shock` (and its
+  supercritical variant), `radiating-sphere`; `sedov-rad` and `sedov-rad-transport` come with
+  `sedov`.
+- **Implicit pressure and the liquid** (phase 11): on the uniform grid alone, like magnetic
+  fields. The uniform multigrid already builds its finest level on an n x 1 x 1 grid (phase 5),
+  so no tridiagonal solver was written; the block solver's sub-block multigrid has 2D
+  addressing. Checked: Sod with implicit pressure on the exact plateau; a liquid run agrees with
+  its 2D strip. No new presets.
+- **Walls, obstacles, pistons, inflow** (phase 12): a box or sphere obstacle is a solid interval
+  of the row, on both grids (`amr/walls_on.wgsl`, `amr/bodies.ts` along x); moving obstacles are
+  uniform-only in any dimension (`movingUnsupported`); cut cells and meshes are refused. The
+  obstacle brush works in 1D. Checked: a wall reflects Sod's shock to rho 2.079, p 2.926; a
+  piston drives a shock with rho 2.07 behind it (exact 2.0675) at the exact speed; inflow holds
+  its state; a wall with two levels of refinement gives the uniform run's numbers. No new
+  presets (the piston is a moving obstacle in a setup).
+- **Particles and debris** (phase 13): does not apply. Debris tallies follow bodies on orbits,
+  which a 1D run has not, so it is refused; there are no tracer particles to carry over
+  (`plans/hybrid-particles.md` is not built). Passive tracers are species, which phase 6 covers.
+- **Later** (phase 14): BS = 64 blocks would only make 1D runs faster, and a 1D run has far
+  fewer cells than a 2D one of the same side, so they wait until wanted. Special relativity
+  is not built in 2D (`plans/special-relativity.md`); its shock tubes will be 1D runs when it is.
 
 **As built, phases 6 to 8.**
 

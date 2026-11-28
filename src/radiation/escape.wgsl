@@ -48,7 +48,8 @@ fn main(@builtin(local_invocation_index) lix: u32) {
   if (lix != 0u) { return; }
   var sum = 0.0;
   for (var i = 0u; i < 256u; i++) { sum += part[i]; }
-  let lum = sum * select(P.dx * P.dx, P.dx, flat);
+  // (A 1D run's faces are of unit area: its cells are per unit area across x.)
+  let lum = sum * select(select(P.dx * P.dx, P.dx, flat), 1.0, n.y == 1);
   let y = lum * clock.dt - ESC[1];
   let t = ESC[0] + y;
   ESC[1] = (t - ESC[0]) - y;

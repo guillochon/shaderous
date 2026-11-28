@@ -98,7 +98,7 @@ export class AmrRad {
     const { device: d, params, clock, state, bt, listLeaf, cfg } = this.o;
     const v = (t: GPUTexture) => t.createView();
     const red = Reducer.create(
-      d, [this.o.cap * BS, BS, cfg.ndim === 2 ? 1 : BS], RAD_DIAG_OPS, 'amr/rad_diagnostics.wgsl', slots,
+      d, [this.o.cap * BS, cfg.ndim === 1 ? 1 : BS, cfg.ndim < 3 ? 1 : BS], RAD_DIAG_OPS, 'amr/rad_diagnostics.wgsl', slots,
       [0, 1].flatMap((p) => [0, 1].map((q) => ({ 0: params, 1: v(state[p][0]), 2: v(state[p][1]), 3: v(this.R[q]), 30: bt, ...comp }))),
       'amr radiation diagnostics',
     );

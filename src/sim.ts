@@ -873,17 +873,21 @@ export function oneDimUnsupported(c: SimConfig): string | null {
   if (c.ndim !== 1) return null;
   if (c.problem.shear) return 'a shearing box needs two axes';
   if (c.problem.disk) return 'a disk needs two axes';
-  if (c.cutCells || c.problem.obstacleDistances) return 'partly filled cells and meshes do not apply in 1D';
-  if (c.problem.mhd) return 'magnetic fields are not available in 1D yet (plans/one-dimensional.md, phase 9)';
-  if (radiationOn(c)) return 'radiation is not available in 1D yet (phase 10)';
-  if (c.resistivity > 0) return 'resistivity is not available in 1D yet (phase 9, with magnetic fields)';
+  // (An obstacle of a box or a sphere is a solid interval of the row; a mesh has no 1D form.)
+  if (c.cutCells) return 'partly filled cells do not apply in 1D: an obstacle fills whole cells of the row';
+  if ((c.problem.setup?.parts ?? []).some((p) => (p.kind === 'obstacle' || p.kind === 'inflow' || p.kind === 'region') && p.shape.type === 'mesh')) return 'meshes do not apply in 1D';
+  // Magnetic fields and implicit pressure: on the uniform grid (up to UNIFORM_1D_TEXTURE cells),
+  // not yet on one-row blocks, whose face and edge passes and sub-block multigrid they need
+  // (plans/one-dimensional.md).
+  const blocks = onBlocks(c);
+  if (c.problem.mhd && blocks) return 'magnetic fields in 1D are on the uniform grid only, so far (2048 cells at most, no refinement)';
   // (Comoving coordinates go, with the periodic self-gravity of slabs: lineGravity. An
   // accelerating frame follows point masses, which a 1D run has but at a spherical run's center,
   // and an axisymmetric run has no rotating frame in 2D either.)
   if (c.problem.rotation || c.problem.frame) return 'rotating and accelerating frames do not apply in 1D: no point masses to follow, and no axis to turn about but an axisymmetric run\u2019s, which has none in 2D either';
-  if (implicitPressure(c) || c.eos === 'liquid') return 'implicit pressure and the liquid are not available in 1D yet (phase 11)';
-  if (c.problem.bodies?.length || c.problem.moving?.length || c.problem.surfaces) return 'obstacles and moving bodies are not available in 1D yet (phase 12)';
-  if (c.problem.debris) return 'debris and particles are not available in 1D yet (phase 13)';
+  if ((implicitPressure(c) || c.eos === 'liquid') && blocks) return 'implicit pressure and the liquid in 1D are on the uniform grid only, so far (2048 cells at most, no refinement)';
+  // (Moving obstacles are on the uniform grid only in any dimension: movingUnsupported.)
+  if (c.problem.debris) return 'debris tallies follow bodies on orbits, which a 1D run has not';
   // A point mass is a sheet across a Cartesian run and a line along an axisymmetric one: only a
   // spherical run's, at its center, is one (sphericalUnsupported).
   if (c.problem.geometry !== 'spherical' && (c.problem.masses?.(c.params, c.G, c.problem.box / c.n, c.ndim).length ?? 0) > 0) return 'point masses sit only at a spherical run’s center in 1D';

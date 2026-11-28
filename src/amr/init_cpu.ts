@@ -322,6 +322,6 @@ export function leafState(x: FillContext, b: BlockAt): LeafState {
         if (sp) packSpecies(sp, o, blockCells * 4, G, w.rho, w.X);
       }
   // (One-sided differences at the block's own faces.)
-  if (rad) diffusionFlux({ ...c, bcLo: [1, 1, 1] }, [BS, BS, depth], dx, rad, radRho!, radT!, radGiven!);
+  if (rad) diffusionFlux({ ...c, bcLo: [1, 1, 1] }, [BS, rows, depth], dx, rad, radRho!, radT!, radGiven!);
   return { u1, u2, faces, km, sp, rad, mass, solids, vmax, pstat };
 }

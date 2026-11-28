@@ -34,14 +34,17 @@ fn store_wall_forces(slot: i32, l: vec3<i32>, c: vec3<i32>, fx: Faces, fy: Faces
   if (has_solids()) {
     s = wall_add(s, fx.hi, wall_mark(slot, l, c, 0, true), 1.0);
     s = wall_add(s, fx.lo, wall_mark(slot, l, c, 0, false), -1.0);
-    s = wall_add(s, fy.hi, wall_mark(slot, l, c, 1, true), 1.0);
-    s = wall_add(s, fy.lo, wall_mark(slot, l, c, 1, false), -1.0);
+    // (A 1D block is its row: no faces along y.)
+    if (!is1d()) {
+      s = wall_add(s, fy.hi, wall_mark(slot, l, c, 1, true), 1.0);
+      s = wall_add(s, fy.lo, wall_mark(slot, l, c, 1, false), -1.0);
+    }
     if (!is2d()) {
       s = wall_add(s, fz.hi, wall_mark(slot, l, c, 2, true), 1.0);
       s = wall_add(s, fz.lo, wall_mark(slot, l, c, 2, false), -1.0);
     }
   }
-  let area = select(g_dx * g_dx, g_dx, is2d());
+  let area = select(select(g_dx * g_dx, g_dx, is2d()), 1.0, is1d());
   if (PSPLIT) {
     textureStore(WV, c, vec4<f32>((s.p + s.v) * area, s.body));
     return;

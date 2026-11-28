@@ -90,7 +90,8 @@ export class BodyBands {
       for (let k = 0; k < depth; k++)
         for (let j = 0; j < BS; j++)
           for (let i = 0; i < BS; i++, li++) {
-            const x = lo[0] + (i + 0.5) * h, y = lo[1] + (j + 0.5) * h, z = this.ndim === 3 ? lo[2] + (k + 0.5) * h : 0;
+            // (A 1D block is its row, on y = 0: amr/regrid.wgsl reads the first row alone.)
+            const x = lo[0] + (i + 0.5) * h, y = this.ndim === 1 ? 0 : lo[1] + (j + 0.5) * h, z = this.ndim === 3 ? lo[2] + (k + 0.5) * h : 0;
             let m = 0;
             for (const s of this.surfaces) if (s.inside(x, y, z)) m = s.mark;
             out[base + q * words + (li >> 2)] |= m << (8 * (li & 3));

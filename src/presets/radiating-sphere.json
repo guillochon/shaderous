@@ -12,6 +12,7 @@
     "box": 1,
     "symmetric": "xyz",
     "supports2d": true,
+    "supports1d": true,
     "bc": { "lo": [1, 1, 1], "hi": [1, 1, 1] }
   },
   "physics": {

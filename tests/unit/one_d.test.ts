@@ -192,17 +192,31 @@ describe('1D configuration', () => {
     expect(s.bcLo[1]).toBe(problemById('noh-spherical').bcLo[1]);
   });
   it('takes the presets that say they make sense in 1D', () => {
-    for (const id of ['sod-x', 'riemann-leblanc', 'noh-planar', 'noh-cylindrical', 'noh-spherical', 'jeans', 'detonation-stable', 'detonation-co', 'thermal-instability', 'zeldovich-pancake']) {
+    for (const id of ['sod-x', 'riemann-leblanc', 'noh-planar', 'noh-cylindrical', 'noh-spherical', 'jeans', 'detonation-stable', 'detonation-co', 'thermal-instability', 'zeldovich-pancake', 'radiative-shock', 'radiating-sphere', 'sedov-rad-transport']) {
       const p = problemById(id);
       expect(p.supports1d).toBe(true);
       expect(refusal(configFor(p, 1024, { ndim: 1 }))).toBeNull();
       expect(refusal(configFor(p, 4096, { ndim: 1, amrLevels: 3 }))).toBeNull();
     }
   });
-  it('refuses what 1D does not take, naming the phase that brings it', () => {
+  it('takes magnetic fields on the uniform grid alone', () => {
+    for (const id of ['brio-wu', 'alfven-wave']) {
+      const p = problemById(id);
+      expect(p.supports1d).toBe(true);
+      expect(refusal(configFor(p, 1024, { ndim: 1 }))).toBeNull();
+      expect(refusal(configFor(p, 1024, { ndim: 1, amrLevels: 2 }))).toMatch(/uniform grid only/);
+      expect(refusal(configFor(p, 4096, { ndim: 1 }))).toMatch(/uniform grid only/);
+    }
+  });
+  it('refuses what 1D does not take', () => {
     const c = configFor(problemById('sod-x'), 1024, { ndim: 1 });
-    expect(oneDimUnsupported({ ...c, problem: { ...c.problem, mhd: {} } } as never)).toMatch(/phase 9/);
-    expect(oneDimUnsupported({ ...c, resistivity: 0.1 })).toMatch(/phase 9/);
+    const b = configFor(problemById('sod-x'), 4096, { ndim: 1 });
+    expect(oneDimUnsupported({ ...c, problem: { ...c.problem, mhd: {} } } as never)).toBeNull();
+    expect(oneDimUnsupported({ ...b, problem: { ...b.problem, mhd: {} } } as never)).toMatch(/uniform grid only/);
+    expect(oneDimUnsupported({ ...c, eos: 'liquid' } as never)).toBeNull();
+    expect(oneDimUnsupported({ ...b, eos: 'liquid' } as never)).toMatch(/uniform grid only/);
+    expect(oneDimUnsupported({ ...c, cutCells: true } as never)).toMatch(/partly filled/);
+    expect(oneDimUnsupported({ ...c, problem: { ...c.problem, debris: {} } } as never)).toMatch(/debris/);
     // Phases 6 to 8: species, burning, cooling, viscosity, conduction, driving, comoving coordinates.
     expect(oneDimUnsupported({ ...c, viscosity: 0.1, conductivity: 0.1, cooling: 'power' } as never)).toBeNull();
     expect(oneDimUnsupported({ ...c, ndim: 2 })).toBeNull();
@@ -232,7 +246,9 @@ describe('1D in the option table', () => {
   });
   it('withholds it from one that does not say so, or that has what 1D does not take', () => {
     expect(unavailable(one!, factsOf(doc({ domain: { ndim: 1 } })))).not.toEqual([]);
-    expect(unavailable(one!, factsOf(doc({ physics: { eos: 'ideal', radiation: 'm1' } } as never)))).not.toEqual([]);
+    expect(unavailable(one!, factsOf(doc({ physics: { eos: 'ideal', radiation: 'm1' } } as never)))).toEqual([]);
+    expect(unavailable(one!, factsOf(doc({ physics: { eos: 'ideal', pressure: 'implicit' } } as never)))).toEqual([]);
+    expect(unavailable(one!, factsOf(doc({ domain: { supports1d: true, ndim: 1, amr: 2 }, physics: { eos: 'ideal', pressure: 'implicit' } } as never)))).not.toEqual([]);
   });
 });
 

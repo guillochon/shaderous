@@ -128,6 +128,8 @@ const rotor: FlowDef<{ rho: number; v0: number; r0: number; r1: number; p: numbe
  */
 const AW = { lambda: Math.SQRT1_2 };
 const awPhase = (x: number, y: number) => (2 * Math.PI * (x + y)) / (Math.SQRT2 * AW.lambda);
+/** The 1D wave's phase: one wavelength across the box, so its period is the box over v_A = 1. */
+const aw1Phase = (ctx: { box: number }, x: number) => (2 * Math.PI * x) / ctx.box;
 const alfvenWave: FlowDef<{ amp: number; p: number }> = {
   name: 'alfven-wave',
   label: 'Circularly polarized Alfven wave',
@@ -140,7 +142,11 @@ const alfvenWave: FlowDef<{ amp: number; p: number }> = {
   // In the frame (x1 along the wave, x2 across it in the plane, z): A_z = x2 B_par + amp
   // lambda / (2 pi) cos(phase) and A_2 = amp lambda / (2 pi) sin(phase), so B_1 = B_par,
   // B_2 = amp sin(phase), B_3 = amp cos(phase).
-  potential: (_ctx, q) => (x, y) => {
+  // A 1D run (plans/one-dimensional.md): the wave along x, one wavelength across the box, its
+  // field given on the faces (a vector potential makes no uniform B_x in 1D).
+  face: (ctx, q) => (ctx.ndim === 1 ? (axis, x) => (axis === 0 ? 1 : axis === 1 ? q.amp * Math.sin(aw1Phase(ctx, x)) : q.amp * Math.cos(aw1Phase(ctx, x))) : () => 0),
+  potential: (ctx, q) => (x, y) => {
+    if (ctx.ndim === 1) return [0, 0, 0];
     const x2 = (y - x) / Math.SQRT2;
     const ph = awPhase(x, y);
     const k = (q.amp * AW.lambda) / (2 * Math.PI);
@@ -148,7 +154,11 @@ const alfvenWave: FlowDef<{ amp: number; p: number }> = {
     // A_2 along (-1, 1) / sqrt(2).
     return [-a2 / Math.SQRT2, a2 / Math.SQRT2, x2 + k * Math.cos(ph)];
   },
-  init: (_ctx, q) => (x, y) => {
+  init: (ctx, q) => (x, y) => {
+    if (ctx.ndim === 1) {
+      const p1 = aw1Phase(ctx, x);
+      return { rho: 1, vx: 0, vy: q.amp * Math.sin(p1), vz: q.amp * Math.cos(p1), p: q.p, s: 0 };
+    }
     const ph = awPhase(x, y);
     const v2 = q.amp * Math.sin(ph);
     return { rho: 1, vx: -v2 / Math.SQRT2, vy: v2 / Math.SQRT2, vz: q.amp * Math.cos(ph), p: q.p, s: 0 };

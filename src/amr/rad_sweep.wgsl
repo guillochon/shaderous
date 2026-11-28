@@ -55,8 +55,8 @@ fn fine_flux(np: i32, a: i32, upper: bool, l: vec3<i32>) -> RFlux {
   f[a] = select(0, BS, upper);
   let t1 = (a + 1) % 3;
   let t2 = (a + 2) % 3;
-  let n1 = select(2, 1, is2d() && t1 == 2);
-  let n2 = select(2, 1, is2d() && t2 == 2);
+  let n1 = select(2, 1, (is2d() && t1 == 2) || (is1d() && t1 == 1));
+  let n2 = select(2, 1, (is2d() && t2 == 2) || (is1d() && t2 == 1));
   var sum = RFlux(0.0, vec3<f32>(0.0));
   for (var j = 0; j < loop_count(n2); j++) {
     for (var i = 0; i < n1; i++) {
@@ -99,7 +99,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let dt = clock.dt / P.rad2.x;
   var divE = 0.0;
   var divF = vec3<f32>(0.0);
-  let nax = select(3, 2, is2d());
+  let nax = blk_axes();
   for (var a = 0; a < loop_count(nax); a++) {
     var e = vec3<i32>(0);
     e[a] = 1;
