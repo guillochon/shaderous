@@ -891,6 +891,12 @@ EMA_DECAY = 0.9995
 # (0: the original 8192 / n, at least 256).
 UNROLL_EVERY = int(os.environ.get("BURN_UNROLL_EVERY", "1"))
 UNROLL_BATCH = int(os.environ.get("BURN_UNROLL_BATCH", "0"))
+# BURN_UNROLL_REL > 0: the unrolled term's gradient is taken on its own and scaled down, if need
+# be, to at most this many times the norm of the rest of the step's gradient. Through a chain of
+# steps an ignition's feedback (heat, temperature, rate) makes it huge: on 36a its norm was 47 at
+# n = 2 and 13,000 at n = 32 against 4.7 for the single-step loss, so that under the shared clip
+# it set the whole step's direction, and fine-tunes fell apart within 3000 steps at any weight.
+UNROLL_REL = float(os.environ.get("BURN_UNROLL_REL", "0"))
 
 
 @torch.no_grad()
@@ -983,6 +989,7 @@ def main():
         step_loss.Dp = Dp
         return loss
 
+    l_sep = None   # the unrolled loss, when its gradient is scaled on its own (UNROLL_REL)
     for s in range(steps):
         (r, Tl, dt, X0), Dt, et = train.sample(8192, fresh)
         loss = step_loss(r, Tl, dt, X0, Dt, et)
@@ -1008,9 +1015,22 @@ def main():
             b = UNROLL_BATCH if UNROLL_BATCH else max(256, 8192 // n)
             lr_, lT, span, U0, UD, ue = train.sample_unrolled(b, fresh)
             l_u = log_loss(unrolled(fwd, lr_, lT, span, U0, n), UD, ue)
-            loss = loss + unroll * UNROLL_EVERY * l_u
+            if UNROLL_REL > 0:
+                l_sep = unroll * UNROLL_EVERY * l_u
+            else:
+                loss = loss + unroll * UNROLL_EVERY * l_u
         opt.zero_grad(set_to_none=True)
         loss.backward()
+        if l_sep is not None:
+            params = [p for p in model.parameters() if p.requires_grad]
+            g_u = torch.autograd.grad(l_sep, params, allow_unused=True)
+            n_rest = torch.sqrt(sum((p.grad ** 2).sum() for p in params if p.grad is not None))
+            n_u = torch.sqrt(sum((g ** 2).sum() for g in g_u if g is not None))
+            scale = torch.clamp(UNROLL_REL * n_rest / n_u.clamp_min(1e-30), max=1.0)
+            for p, g in zip(params, g_u):
+                if g is not None:
+                    p.grad = g * scale if p.grad is None else p.grad + g * scale
+            l_sep = None
         # A batch whose loss or gradient is not finite is skipped, not allowed to poison the
         # weights (one such step turned a whole run to NaN).
         if all(torch.isfinite(p.grad).all() for p in model.parameters() if p.grad is not None):
