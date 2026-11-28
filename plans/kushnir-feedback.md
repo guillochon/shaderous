@@ -126,6 +126,44 @@ Plan:
    and `CHANGELOG.md`. In the paper, say that the reference keeps aprox13's heavy-ion branches
    and report the step-consistency test.
 
+### Results so far (2026-11-27/28)
+
+All scores are against the new reference. "General" is run_rounds.py's metric, the mean p99
+over 4 times (lower is better). "Spread" is stepscore.py's X(Ni56) at 0.01 s across steps of
+3e-6 to 1e-3 s, p90, for hot C/O / Si/S.
+
+| Model | How | General | Spread |
+|---|---|---|---|
+| shipped (35b + gates) | | n/a | 0.35 / 0.49 |
+| 35b | | 0.477 | 0.34 / 0.56 |
+| 36a | round 36: plain fine-tune on the re-labeled data | 0.349 | 0.58 / 0.55 |
+| 37, 38 | further plain rounds | 0.36-0.52 | (not kept) |
+| unrolled, 1500 steps, local | weight 0.05, 2-32 steps, clipped to 1x | (val worst 0.90) | 0.28 / 0.47 |
+| 39c (Unity) | same, a full round | 0.78 | 0.38 / 0.61 |
+| exp A | 2-step stretches only, full round | 1.66-2.0 | collapsed |
+| exp B | 2- and 4-step stretches | 1.85-2.0 | collapsed |
+| exp C 40c | +8000 burns in Kushnir's regime (gen_kushnir.py), plain round | 0.416 | 0.58 / 0.80 |
+| exp D 40c | plain round at lr 1.5e-4 | 0.359 | 0.67 / 0.70 |
+
+Kushnir's two cases, for 36a: one 1.2e-4 s step from 4.4e9 K at 2.1e7 g/cm^3 now gives 0.15
+(reference 0.19; shipped 0.71), fixed. At 1e7 g/cm^3 from 3.5e9 K, X(Ni56) at 0.1 s is still
+0.03-0.87 across steps (reference 0.65).
+
+What this says:
+- The unrolled term's gradient is 10 to 3000 times the single-step gradient (ignition feedback
+  through the temperature). Unclipped, it sets the direction of every step. Clipped to the rest,
+  it still drags the fit, and over a full round even 2-step stretches collapse. A possible
+  contributor not yet checked: spans up to 1 s give steps of up to 0.5 s, far past the
+  simulator's 10 ms network step.
+- More reference data in exactly this regime made the model worse there, so the limit looks like
+  the per-step architecture, not the data.
+- Next candidates: an equilibrium (QSE/NSE) relaxation above about 4.5e9 K, which is Kushnir &
+  Katz 2020's own approach; or a different step structure. Ship 36a meanwhile? It fixes the
+  single-step runaway and the proton exits, but not the step spread.
+
+Unity is set up for this: tools/burn/unity/rounds.sbatch, the image at
+~/containers/shaderous-burn.sif, and experiment folders burn-exp{A,B,C,D} beside burn-train.
+
 ## Order
 
 1 and 2 are text changes after a few GPU runs and can ship soon. 3 needs the reference rebuilt,
