@@ -44,15 +44,18 @@ export const defaultDrive = (): DriveParams => ({ accel: 0, tau: 0.5, kMin: 1, k
 export function driveModes(ndim: 1 | 2 | 3, kMin: number, kMax: number): [number, number, number][] {
   const out: [number, number, number][] = [];
   const m = Math.floor(kMax);
+  // (A 1D run's modes lie along x alone, a 2D run's in the plane.)
+  const mj = ndim === 1 ? 0 : m;
+  const mk = ndim === 3 ? m : 0;
   for (let i = -m; i <= m; i++)
-    for (let j = -m; j <= m; j++)
-      for (let k = ndim === 2 ? 0 : -m; k <= (ndim === 2 ? 0 : m); k++) {
+    for (let j = -mj; j <= mj; j++)
+      for (let k = -mk; k <= mk; k++) {
         const r = Math.hypot(i, j, k);
         if (r < kMin || r > kMax || r === 0) continue;
         // One of each pair: the first nonzero component positive.
         const first = i !== 0 ? i : j !== 0 ? j : k;
         if (first < 0) continue;
-        out.push([i, j, k]);
+        out.push([i, j + 0, k + 0]); // (+ 0: no -0 from a bound of 0)
       }
   out.sort((a, b) => Math.hypot(...a) - Math.hypot(...b) || a[0] - b[0] || a[1] - b[1] || a[2] - b[2]);
   return out.slice(0, DRIVE_MODES);
@@ -104,6 +107,8 @@ export function packDrive(p: DriveParams, ndim: 1 | 2 | 3, box: number): ArrayBu
     const amp = () => {
       const g = [xi(), xi(), ndim === 2 ? 0 : xi()];
       if (ndim === 2) xi();
+      // (A 1D run is driven along x alone: compressively, the only way there is.)
+      if (ndim === 1) g[1] = g[2] = 0;
       const along = (g[0] * k[0] + g[1] * k[1] + g[2] * k[2]) / (kk * kk);
       return g.map((c, i) => sigma * (p.zeta * (c - along * k[i]) + (1 - p.zeta) * along * k[i]));
     };

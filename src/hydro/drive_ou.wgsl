@@ -45,6 +45,8 @@ fn drive_advance(h: f32) {
   let f = exp(-h / DRIVE.par.x);
   let s = DRIVE.par.y * sqrt(max(1.0 - f * f, 0.0));
   let flat = DRIVE.n.w == 2u;
+  // (A 1D run's noise is along x alone.)
+  let line = DRIVE.n.w == 1u;
   for (var m = 0u; m < n; m++) {
     let k = DRIVE.mode[3u * m].xyz;
     let g0 = drive_normal2(m, 0u);
@@ -55,6 +57,10 @@ fn drive_advance(h: f32) {
     if (flat) {
       xr.z = 0.0;
       xi.z = 0.0;
+    }
+    if (line) {
+      xr = vec3<f32>(xr.x, 0.0, 0.0);
+      xi = vec3<f32>(xi.x, 0.0, 0.0);
     }
     DRIVE.mode[3u * m + 1u] = vec4<f32>(f * DRIVE.mode[3u * m + 1u].xyz + s * drive_project(xr, k), 0.0);
     DRIVE.mode[3u * m + 2u] = vec4<f32>(f * DRIVE.mode[3u * m + 2u].xyz + s * drive_project(xi, k), 0.0);

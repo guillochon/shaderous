@@ -31,7 +31,7 @@ fn x_at(slot: i32, l: vec3<i32>) -> array<vec4<f32>, NG> {
   let f = 2 * (l - (BS / 2) * h);
   let nz = select(2, 1, is2d());
   for (var k = 0; k < nz; k++) {
-    for (var j = 0; j < 2; j++) {
+    for (var j = 0; j < kids_y(); j++) {
       for (var i = 0; i < 2; i++) {
         let c = u_leaf(ch, f + vec3<i32>(i, j, k));
         // (Weighed by the children's volumes in (R, z) and (r, theta) runs: amr/grid.wgsl.)
@@ -75,7 +75,7 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_index) 
     // Its slope along each axis, from the coarse cells on both sides (none where either side is
     // not at the coarse block's level), toward the quarter of it the ghost sits in.
     let off = vec3<f32>(gf & vec3<i32>(1)) - 0.5;
-    let axes = select(3, 2, is2d());
+    let axes = blk_axes();
     var y = x;
     for (var a = 0; a < axes; a++) {
       let m = x_near(s.slot, lc - unit(a));

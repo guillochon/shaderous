@@ -9,6 +9,7 @@
   "variant": "Standard",
   "blurb": "A plane wave of cold gas in an expanding Einstein-de Sitter universe (comoving coordinates): it collapses to a sheet at z = 1, then shocks into a pancake.",
   "domain": {
+    "supports1d": true,
     "box": 1,
     "n": 64,
     "bc": { "lo": [0, 0, 0], "hi": [0, 0, 0] }

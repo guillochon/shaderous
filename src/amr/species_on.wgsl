@@ -14,7 +14,7 @@ const SPECIES = true;
 fn store_mass_flux(slot: i32, l: vec3<i32>, c: vec3<i32>, fx: Faces, fy: Faces, fz: Faces) {
   let lo = vec3<f32>(fx.lo.m, fy.lo.m, fz.lo.m);
   let hi = vec3<f32>(fx.hi.m, fy.hi.m, fz.hi.m);
-  let nax = select(3, 2, is2d());
+  let nax = blk_axes();
   for (var a = 0; a < nax; a++) {
     mf_store(mf_index(slot, l, a), lo[a]);
     var e = vec3<i32>(0);

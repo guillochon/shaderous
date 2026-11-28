@@ -21,6 +21,7 @@
 @group(0) @binding(2) var<storage, read_write> SH: array<f32>;
 @group(0) @binding(3) var PHI: texture_storage_3d<r32float, write>;
 @group(0) @binding(4) var GOUT: texture_storage_3d<rgba32float, write>;
+@group(0) @binding(5) var<storage, read> clock: Clock;
 
 const HEAD = 4u;
 override LINE: u32 = 0u;
@@ -114,12 +115,15 @@ fn enclose() {
   let n = P.dims.x;
   let gs = select(0.0, P.G, SH[1] != 0.0);
   let gm = SH[0];
+  // (Comoving coordinates: the field of the comoving density over a, as gravity/rhs.wgsl and
+  // gravity/field.wgsl have it.)
+  let gl = gs / select(1.0, clock.a1, cosmo_on());
   if (LINE == 1u || LINE == 2u) {
-    enclose_planar(n, gs);
+    enclose_planar(n, gl);
     return;
   }
   if (LINE == 3u) {
-    enclose_cylinder(n, gs);
+    enclose_cylinder(n, gl);
     return;
   }
   // Outward: the mass inside each cell's center, the shells below and its own share inside r_c.
@@ -161,5 +165,7 @@ fn field(@builtin(global_invocation_id) gid: vec3<u32>) {
   let phi = SH[HEAD + 2u * n + gid.x];
   let old = SH[HEAD + 3u * n + gid.x];
   textureStore(PHI, c, vec4<f32>(phi, 0.0, 0.0, 0.0));
-  textureStore(GOUT, c, vec4<f32>(SH[HEAD + n + gid.x], 0.0, 0.0, 1.5 * phi - 0.5 * old));
+  // (Comoving coordinates: the field over a once more, as gravity/field.wgsl has it.)
+  let g = SH[HEAD + n + gid.x] / select(1.0, clock.a1, cosmo_on() && LINE != 0u);
+  textureStore(GOUT, c, vec4<f32>(g, 0.0, 0.0, 1.5 * phi - 0.5 * old));
 }

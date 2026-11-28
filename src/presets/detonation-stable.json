@@ -11,6 +11,7 @@
   "domain": {
     "box": 40,
     "supports2d": true,
+    "supports1d": true,
     "bc": { "lo": [1, 2, 2], "hi": [1, 2, 2] }
   },
   "physics": {

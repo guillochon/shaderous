@@ -1,8 +1,30 @@
 # Plan: one-dimensional runs
 
-Status (2026-11-27): phases 1 to 5 built; 6 to 14 not started. Open questions of the first
+Status (2026-11-27): phases 1 to 8 built (8 as comoving coordinates alone); 9 to 14 not started. Open questions of the first
 draft answered: the profile tool is locked to radial lines in spherical and cylindrical 1D runs,
 the cylindrical view is a half-disk like the spherical one, and the 1D chip alone marks the view.
+
+**As built, phases 6 to 8.**
+
+- **Species, burning, cooling** (phase 6): the block species passes reach along x alone
+  (`blk_axes`, two children in restriction, one fine face a coarse one), and the burn passes are
+  dispatched sixteen blocks a row (`dispatch.ts burnInterior`). Checked: the stable detonation's
+  front runs at 6.80 (D_CJ 6.81) with its spike at 42.0 (ZND 42.1), uniform and on blocks; the
+  pulsating one, the carbon-oxygen network detonation, Mader's and the thermal instability run
+  on both grids with mass conserved.
+- **Viscosity, conduction, driving** (phase 7): the viscous stress leaves out its y and z cross
+  terms (`hydro/diffusion_core.wgsl`), which leaves (4/3) mu dv/dx for vx and mu dv/dx for vy and
+  vz; driving's modes and noise lie along x (`driveModes`, `drive_ou.wgsl`), so a 1D run is driven
+  compressively, the only way there is: a solenoidal share of 1 drives nothing, and the
+  `driven-turbulence` preset (all solenoidal) is not offered in 1D. Checked: a viscosity of 1e-3
+  widens Sod's shock tenfold, on both grids alike.
+- **Frames and cosmology** (phase 8): comoving coordinates, with the 1D periodic self-gravity
+  taking G over a in its source and the field over a once more, as the 3D solver does
+  (`gravity/sph_monopole.wgsl`, `amr/sph_monopole.wgsl`). Rotating and accelerating frames stay
+  refused: an accelerating frame follows point masses, which a 1D run has but at a spherical run's
+  center, and an axisymmetric run has no rotating frame in 2D either. Checked: the Zel'dovich
+  pancake's center at z = 2 is 3.02 (uniform) and 3.03 (blocks) against 3 from its solution
+  (3D at 64^3: 2.94).
 
 **As built, phases 1 to 5.**
 

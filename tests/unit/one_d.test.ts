@@ -5,6 +5,7 @@ import { domainHi, domainLo, gridDims, rectangular } from '../../src/domain';
 import { BlockTree, BT_STRIDE, RG_RESTRICT } from '../../src/amr/tree';
 import { clipSegment, decodeProfileLines, encodeProfileLines, lockLine, type Vec3 } from '../../src/ui/profile';
 import { decodeLink, encodeLink, viewDefaults } from '../../src/ui/link';
+import { driveModes } from '../../src/hydro/drive';
 import { configFor, lineGravity, onBlocks, oneDimUnsupported, refusal } from '../../src/sim';
 import { mapWindow } from '../../src/render/renderer';
 import { problemById } from '../../src/problems';
@@ -191,7 +192,7 @@ describe('1D configuration', () => {
     expect(s.bcLo[1]).toBe(problemById('noh-spherical').bcLo[1]);
   });
   it('takes the presets that say they make sense in 1D', () => {
-    for (const id of ['sod-x', 'riemann-leblanc', 'noh-planar', 'noh-cylindrical', 'noh-spherical', 'jeans']) {
+    for (const id of ['sod-x', 'riemann-leblanc', 'noh-planar', 'noh-cylindrical', 'noh-spherical', 'jeans', 'detonation-stable', 'detonation-co', 'thermal-instability', 'zeldovich-pancake']) {
       const p = problemById(id);
       expect(p.supports1d).toBe(true);
       expect(refusal(configFor(p, 1024, { ndim: 1 }))).toBeNull();
@@ -200,14 +201,24 @@ describe('1D configuration', () => {
   });
   it('refuses what 1D does not take, naming the phase that brings it', () => {
     const c = configFor(problemById('sod-x'), 1024, { ndim: 1 });
-    expect(oneDimUnsupported({ ...c, viscosity: 0.1 })).toMatch(/phase 7/);
-    expect(oneDimUnsupported({ ...c, cooling: 'power' } as never)).toMatch(/phase 6/);
+    expect(oneDimUnsupported({ ...c, problem: { ...c.problem, mhd: {} } } as never)).toMatch(/phase 9/);
+    expect(oneDimUnsupported({ ...c, resistivity: 0.1 })).toMatch(/phase 9/);
+    // Phases 6 to 8: species, burning, cooling, viscosity, conduction, driving, comoving coordinates.
+    expect(oneDimUnsupported({ ...c, viscosity: 0.1, conductivity: 0.1, cooling: 'power' } as never)).toBeNull();
     expect(oneDimUnsupported({ ...c, ndim: 2 })).toBeNull();
   });
   it('solves its self-gravity as its geometry asks', () => {
     expect(lineGravity(configFor(problemById('jeans'), 512, { ndim: 1 }))).toBe(2);
     expect(lineGravity(configFor(problemById('noh-spherical'), 512, { ndim: 1 }))).toBe(0);
     expect(lineGravity(configFor(problemById('noh-cylindrical'), 512, { ndim: 1 }))).toBe(3);
+  });
+});
+
+describe('1D driving', () => {
+  it('drives modes along x alone', () => {
+    const m = driveModes(1, 1, 3);
+    expect(m.length).toBe(3);
+    for (const k of m) expect([k[1], k[2]]).toEqual([0, 0]);
   });
 });
 

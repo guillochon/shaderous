@@ -35,8 +35,9 @@ export const gravityColor = (count: number, bsize: number): [number, number, num
  * forever.
  */
 export const burnInterior = (ndim: 1 | 2 | 3, count: number): [number, number, number] => {
-  if (ndim === 2) {
-    const q = Math.ceil(count / 4);
+  if (ndim < 3) {
+    // (A 1D run's blocks are one row: sixteen to a 2D block's workgroups, amr/list.wgsl inv_interior.)
+    const q = Math.ceil(count / (ndim === 1 ? 64 : 4));
     return [Math.min(q, SLAB_QUADS) * 2, 4, 2 * Math.ceil(q / SLAB_QUADS)];
   }
   return [Math.min(count, SLAB_BLOCKS) * 2, 4, 8 * slabs(count)];

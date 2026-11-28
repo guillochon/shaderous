@@ -26,6 +26,7 @@
 @group(0) @binding(2) var<storage, read_write> SH: array<f32>;
 @group(0) @binding(3) var PHI: texture_storage_3d<r32float, write>;
 @group(0) @binding(4) var GOUT: texture_storage_3d<rgba32float, write>;
+@group(0) @binding(5) var<storage, read> clock: Clock;
 
 // The potential's half-step extrapolation (off with per-block timesteps, whose blocks' halves
 // differ: the potential now).
@@ -174,12 +175,14 @@ fn enclose() {
     SH[o_in_old() + h] = SH[o_in() + h];
     SH[o_out_old() + h] = SH[o_out() + h];
   }
+  // (Comoving coordinates: the field of the comoving density over a, as gravity/rhs.wgsl has it.)
+  let gl = select(0.0, P.G, SH[1] != 0.0) / select(1.0, clock.a1, cosmo_on());
   if (LINE == 1u || LINE == 2u) {
-    enclose_planar(n, dxf, select(0.0, P.G, SH[1] != 0.0));
+    enclose_planar(n, dxf, gl);
     return;
   }
   if (LINE == 3u) {
-    enclose_cylinder(n, dxf, select(0.0, P.G, SH[1] != 0.0));
+    enclose_cylinder(n, dxf, gl);
     return;
   }
   // Outward: the mass inside each face, and inside each center (its own share inside r_c, as
@@ -236,7 +239,8 @@ fn field(@builtin(global_invocation_id) gid: vec3<u32>) {
   let c0 = atl(blk_origin(inv.slot), l);
   if (LINE != 0u) {
     // A 1D run: the field and potential at the half index, as enclose left them.
-    let g1 = SH[o_in() + h];
+    // (Comoving coordinates: the field over a once more, as gravity/field.wgsl has it.)
+    let g1 = SH[o_in() + h] / select(1.0, clock.a1, cosmo_on());
     let p1 = SH[o_out() + h];
     let w1 = select(p1, 1.5 * p1 - 0.5 * SH[o_out_old() + h], HALF);
     textureStore(PHI, c0, vec4<f32>(p1, 0.0, 0.0, 0.0));

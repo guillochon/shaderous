@@ -79,8 +79,10 @@ fn visc_flux(a: vec3<i32>, e: vec3<i32>, axis: i32, l: DSide, r: DSide) -> vec4<
     vf = select(vl, vr, r.solid);
   } else {
     let flat = P.dims.z == 1u;
-    if (!(flat && t1 == 2)) { d1 = visc_across(a, e, axis, t1, vl, vr); }
-    if (!(flat && t2 == 2)) { d2 = visc_across(a, e, axis, t2, vl, vr); }
+    // (A 1D run reaches along neither y nor z: plans/one-dimensional.md.)
+    let line = P.dims.y == 1u;
+    if (!(flat && t1 == 2) && !(line && t1 == 1)) { d1 = visc_across(a, e, axis, t1, vl, vr); }
+    if (!(flat && t2 == 2) && !(line && t2 == 1)) { d2 = visc_across(a, e, axis, t2, vl, vr); }
   }
   // tau . n: component i is dv_i/dn + dv_n/dx_i, less 2/3 div v along the normal.
   var tau = dn;

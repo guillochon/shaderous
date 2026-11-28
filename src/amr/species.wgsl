@@ -75,8 +75,8 @@ fn fine_flux(slot: i32, np: i32, axis: i32, upper: bool, l: vec3<i32>) -> array<
   f[axis] = select(-1, BS - 1, upper);
   let t1 = (axis + 1) % 3;
   let t2 = (axis + 2) % 3;
-  let n1 = select(2, 1, is2d() && t1 == 2);
-  let n2 = select(2, 1, is2d() && t2 == 2);
+  let n1 = select(2, 1, (is2d() && t1 == 2) || (is1d() && t1 == 1));
+  let n2 = select(2, 1, (is2d() && t2 == 2) || (is1d() && t2 == 1));
   var sum: array<vec4<f32>, NG>;
   for (var j = 0; j < n2; j++) {
     for (var i = 0; i < n1; i++) {
@@ -124,7 +124,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     return;
   }
   var acc: array<vec4<f32>, NG>;
-  let nax = select(3, 2, is2d());
+  let nax = blk_axes();
   for (var a = 0; a < nax; a++) {
     var lo: array<vec4<f32>, NG>;
     var hi: array<vec4<f32>, NG>;

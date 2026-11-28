@@ -1734,9 +1734,9 @@ export class AmrSim implements Simulation {
       rows, shells, enclose, field, fieldNow, buf, phi,
       gRows: [0, 1].map((p) => bindGroup(d, rows, { 0: this.params, 1: v(this.state[p][0]), 2: buf, 30: this.bt, 31: this.listLeaf })),
       gShells: bindGroup(d, shells, { 0: this.params, 2: buf, 30: this.bt, 31: this.listLeaf }),
-      gEnclose: bindGroup(d, enclose, { 0: this.params, 2: buf }),
-      gField: bindGroup(d, field, { 0: this.params, 2: buf, 3: v(phi), 4: v(this.gfield), 30: this.bt, 31: this.listAll }),
-      gFieldNow: [this.listAct, this.listAll].map((list) => bindGroup(d, fieldNow, { 0: this.params, 2: buf, 3: v(phi), 4: v(this.gfield), 30: this.bt, 31: list })),
+      gEnclose: bindGroup(d, enclose, { 0: this.params, 2: buf, 5: this.clock }),
+      gField: bindGroup(d, field, { 0: this.params, 2: buf, 3: v(phi), 4: v(this.gfield), 5: this.clock, 30: this.bt, 31: this.listAll }),
+      gFieldNow: [this.listAct, this.listAll].map((list) => bindGroup(d, fieldNow, { 0: this.params, 2: buf, 3: v(phi), 4: v(this.gfield), 5: this.clock, 30: this.bt, 31: list })),
     };
   }
 

@@ -876,10 +876,11 @@ export function oneDimUnsupported(c: SimConfig): string | null {
   if (c.cutCells || c.problem.obstacleDistances) return 'partly filled cells and meshes do not apply in 1D';
   if (c.problem.mhd) return 'magnetic fields are not available in 1D yet (plans/one-dimensional.md, phase 9)';
   if (radiationOn(c)) return 'radiation is not available in 1D yet (phase 10)';
-  if ((c.problem.species?.length ?? 0) > 0 || burnSpec(c) || c.cooling !== 'off') return 'species, burning and cooling are not available in 1D yet (phase 6)';
-  if (c.viscosity > 0 || conducts(c) || c.resistivity > 0) return 'viscosity and conduction are not available in 1D yet (phase 7)';
-  if (c.driving.accel > 0) return 'turbulence driving is not available in 1D yet (phase 7)';
-  if (c.problem.rotation || c.problem.frame || cosmologyOf(c)) return 'rotating and accelerating frames and comoving coordinates are not available in 1D yet (phase 8)';
+  if (c.resistivity > 0) return 'resistivity is not available in 1D yet (phase 9, with magnetic fields)';
+  // (Comoving coordinates go, with the periodic self-gravity of slabs: lineGravity. An
+  // accelerating frame follows point masses, which a 1D run has but at a spherical run's center,
+  // and an axisymmetric run has no rotating frame in 2D either.)
+  if (c.problem.rotation || c.problem.frame) return 'rotating and accelerating frames do not apply in 1D: no point masses to follow, and no axis to turn about but an axisymmetric run\u2019s, which has none in 2D either';
   if (implicitPressure(c) || c.eos === 'liquid') return 'implicit pressure and the liquid are not available in 1D yet (phase 11)';
   if (c.problem.bodies?.length || c.problem.moving?.length || c.problem.surfaces) return 'obstacles and moving bodies are not available in 1D yet (phase 12)';
   if (c.problem.debris) return 'debris and particles are not available in 1D yet (phase 13)';
@@ -2384,8 +2385,8 @@ export class Sim implements Simulation {
       const buf = d.createBuffer({ label: 'spherical monopole', size: 4 * (4 + 4 * n), usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
       const g = [0, 1].map((p) => [
         bindGroup(d, shells, { 0: sim.params, 1: v(sim.state[p][0]), 2: buf }),
-        bindGroup(d, enclose, { 0: sim.params, 2: buf }),
-        bindGroup(d, field, { 0: sim.params, 2: buf, 3: v(phi), 4: v(sim.gfield) }),
+        bindGroup(d, enclose, { 0: sim.params, 2: buf, 5: sim.clock }),
+        bindGroup(d, field, { 0: sim.params, 2: buf, 3: v(phi), 4: v(sim.gfield), 5: sim.clock }),
       ]);
       sim.sphMono = { shells, enclose, field, g, buf };
     }

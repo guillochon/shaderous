@@ -41,14 +41,14 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let f = 2 * (l - (BS / 2) * h);
     let nz = select(2, 1, is2d());
     for (var k = 0; k < nz; k++) {
-      for (var j = 0; j < 2; j++) {
+      for (var j = 0; j < kids_y(); j++) {
         for (var i = 0; i < 2; i++) {
           let s = load_s(atl(o, f + vec3<i32>(i, j, k)));
           for (var g = 0u; g < NG; g++) { u[g] += s[g]; }
         }
       }
     }
-    let w = select(0.125, 0.25, is2d());
+    let w = kids_w();
     for (var g = 0u; g < NG; g++) { u[g] *= w; }
   } else {
     u = load_s(atl(blk_origin(src), l));

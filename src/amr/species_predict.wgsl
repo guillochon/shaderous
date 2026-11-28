@@ -30,7 +30,7 @@ fn predict_x(slot: i32, l: vec3<i32>, mask: vec3<f32>) -> array<vec4<f32>, NG> {
     let gl = blk_coord(slot) * BS + l;
     hs = sph_cell_g(gl.x, select(gl.y, 0, is1d()), blk_sph_grid(slot)).h;
   }
-  let nax = select(3, 2, is2d());
+  let nax = blk_axes();
   for (var a = 0; a < nax; a++) {
     if (mask[a] == 0.0) { continue; }
     var e = vec3<i32>(0);

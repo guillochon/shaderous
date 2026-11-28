@@ -165,13 +165,13 @@ export const FACTS: Record<string, { label: string; of: (s: SetupSpec) => Value;
   'domain.supports1d': { label: 'A setup that makes sense in 1D', of: (s) => s.domain?.supports1d ?? false },
   // What a 1D run does not take yet, or ever (sim.ts oneDimUnsupported, plans/one-dimensional.md).
   'oneD.blocked': {
-    label: 'A magnetic field, radiation, species, burning, cooling, viscosity, conduction, driving, a rotating or accelerating frame, comoving coordinates, implicit pressure, the liquid, a shearing box, obstacles, inflows, an orbit, a disk or a wind tunnel',
+    label: 'A magnetic field, radiation, a rotating or accelerating frame, implicit pressure, the liquid, a shearing box, obstacles, inflows, an orbit, a disk or a wind tunnel',
     of: (s) => {
       const ph = s.physics ?? {};
       const om = ph.rotation?.omega ?? [0, 0, 0];
-      return FACTS.magnetic.of(s) === true || (ph.radiation ?? 'off') !== 'off' || FACTS['species.any'].of(s) === true || !!ph.burn || (ph.cooling ?? 'off') !== 'off' ||
-        (ph.viscosity ?? 0) > 0 || (ph.conductivity ?? 0) > 0 || (ph.resistivity ?? 0) > 0 || (ph.driving?.accel ?? 0) > 0 || om.some((v) => v !== 0) ||
-        (ph.frame ?? 'inertial') !== 'inertial' || !!ph.cosmology || (ph.pressure ?? 'explicit') === 'implicit' || eosKind(s) === 'liquid' || !!ph.shear ||
+      return FACTS.magnetic.of(s) === true || (ph.radiation ?? 'off') !== 'off' ||
+        (ph.resistivity ?? 0) > 0 || om.some((v) => v !== 0) ||
+        (ph.frame ?? 'inertial') !== 'inertial' || (ph.pressure ?? 'explicit') === 'implicit' || eosKind(s) === 'liquid' || !!ph.shear ||
         parts(s).some((p) => ['obstacle', 'inflow', 'tunnel', 'orbit', 'disk'].includes(p.kind));
     },
   },
