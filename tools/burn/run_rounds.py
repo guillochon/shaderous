@@ -37,6 +37,8 @@ TEACH = "0" if TEACHER == "-" else os.environ.get("BURN_TEACH", "1")
 # between two times of a reference trajectory, judged where they end, so that the model burns
 # alike whatever the step (Kushnir's test, stepscore.py).
 UNROLL = os.environ.get("BURN_UNROLL", "0")
+# The fine-tunes' peak learning rate (BURN_LR, default 5e-4).
+LR = os.environ.get("BURN_LR", "5e-4")
 
 
 def metric(s):
@@ -81,7 +83,7 @@ def main():
                 continue
             m = f"model_dagger_{r}{v}.pt"
             models.append(m)
-            cmds.append([PY, "train.py", "30000", "128", "4", "4", m, "0.3", "0.2", "flow2f", "1", best, UNROLL, "5e-4",
+            cmds.append([PY, "train.py", "30000", "128", "4", "4", m, "0.3", "0.2", "flow2f", "1", best, UNROLL, LR,
                          "1", "0.3", str(10 * r + i), TEACHER, TEACH, ow, jw])
         codes = run_all(cmds, [f"train_dagger_{Path(m).stem[len('model_dagger_'):]}.log" for m in models], env)
         models = [m for m, c in zip(models, codes) if c == 0 and (HERE / m).exists()]

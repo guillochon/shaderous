@@ -897,6 +897,9 @@ UNROLL_BATCH = int(os.environ.get("BURN_UNROLL_BATCH", "0"))
 # n = 2 and 13,000 at n = 32 against 4.7 for the single-step loss, so that under the shared clip
 # it set the whole step's direction, and fine-tunes fell apart within 3000 steps at any weight.
 UNROLL_REL = float(os.environ.get("BURN_UNROLL_REL", "0"))
+# The numbers of steps an unrolled stretch takes, one drawn per use (BURN_UNROLL_NS, commas):
+# 2, 4, 8, 16, 32 by default. The gradient grows with the length (norm 47 at 2, 13,000 at 32).
+UNROLL_NS = [int(v) for v in os.environ.get("BURN_UNROLL_NS", "2,4,8,16,32").split(",")]
 
 
 @torch.no_grad()
@@ -1011,7 +1014,7 @@ def main():
             # number of steps far more than by the batch (each step is hundreds of small kernels),
             # so BURN_UNROLL_EVERY > 1 runs it every that many training steps on a batch of
             # BURN_UNROLL_BATCH, its weight scaled up to keep its share of the training.
-            n = int(2 ** torch.randint(1, 6, ()).item())
+            n = UNROLL_NS[int(torch.randint(0, len(UNROLL_NS), ()).item())]
             b = UNROLL_BATCH if UNROLL_BATCH else max(256, 8192 // n)
             lr_, lT, span, U0, UD, ue = train.sample_unrolled(b, fresh)
             l_u = log_loss(unrolled(fwd, lr_, lT, span, U0, n), UD, ue)
