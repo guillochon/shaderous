@@ -808,7 +808,18 @@ def heat(D, X1, rho, T):
     de = (D * Q).sum(dim=1) * 1e18
     ia1 = (X1.clamp_min(0.0) / A_T).sum(dim=1)
     ia0 = ((X1 - D).clamp_min(0.0) / A_T).sum(dim=1)
-    return helm.heat_t(rho, T, ia0, ia1, de, iters=10).clamp(1e7, 3e10)
+    if not torch.is_grad_enabled() or not (D.requires_grad or T.requires_grad):
+        return helm.heat_t(rho, T, ia0, ia1, de, iters=10).clamp(1e7, 3e10)
+    # Under autograd: Newton without a graph, then one differentiable Newton step at the converged
+    # T. The value is the same and, by the implicit function theorem, so is the gradient to first
+    # order; recording all ten iterations made the unrolled term's backward pass twice as long.
+    with torch.no_grad():
+        T1 = helm.heat_t(rho, T, ia0, ia1, de, iters=10)
+    r = rho.double()
+    goal = helm.thermo_t(r, torch.log(T.double().clamp(1e4, 1e11)), ia0.double())[0] + de.double()
+    ln1 = torch.log(T1.double())
+    e, slope = helm.thermo_t(r, ln1, ia1.double())
+    return torch.exp(ln1 - (e - goal) / slope.detach()).to(rho.dtype).clamp(1e7, 3e10)
 
 
 @torch.no_grad()
@@ -876,6 +887,10 @@ def rollout(model, rho, X, T, t, dt_hydro):
     return {"steps": steps, "X_l1_p50": torch.quantile(l_x, 0.5).item(), "X_l1_p99": torch.quantile(l_x, 0.99).item(), "X_l1_max": l_x.max().item(), "e_err_p99": torch.quantile(l_e, 0.99).item(), "e_err_max": l_e.max().item()}
 
 EMA_DECAY = 0.9995
+# The unrolled term's schedule (see main): every UNROLL_EVERY training steps, on UNROLL_BATCH rows
+# (0: the original 8192 / n, at least 256).
+UNROLL_EVERY = int(os.environ.get("BURN_UNROLL_EVERY", "1"))
+UNROLL_BATCH = int(os.environ.get("BURN_UNROLL_BATCH", "0"))
 
 
 @torch.no_grad()
@@ -939,6 +954,13 @@ def main():
         print("starting from", init)
     print(sum(p.numel() for p in model.parameters()), "parameters")
     ema = copy.deepcopy(model)
+    # BURN_COMPILE=1: the unrolled term through torch.compile (Linux, with Triton): its cost is
+    # launch overhead, hundreds of small kernels per step, which fusing removes. The model itself
+    # stays uncompiled, so its weights save as before.
+    fwd = model
+    if os.environ.get("BURN_COMPILE") and unroll > 0:
+        fwd = torch.compile(model)
+        helm.thermo_t = torch.compile(helm.thermo_t)
     opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-5, eps=1e-20 if arch == "flux" else 1e-8)
     sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=lr, total_steps=steps, pct_start=0.05)
     t0 = time.time()
@@ -976,13 +998,17 @@ def main():
             with torch.no_grad():
                 Dq = teacher(*near)
             loss = loss + teach * step_loss(*near, Dq, (Dq * Q).sum(dim=1))
-        if unroll > 0:
+        if unroll > 0 and s % UNROLL_EVERY == 0:
             # A stretch of n steps (2 to 32) between two times of a trajectory, judged where
-            # it ends: absolute and relative errors as for single steps.
+            # it ends: absolute and relative errors as for single steps. Its cost is set by the
+            # number of steps far more than by the batch (each step is hundreds of small kernels),
+            # so BURN_UNROLL_EVERY > 1 runs it every that many training steps on a batch of
+            # BURN_UNROLL_BATCH, its weight scaled up to keep its share of the training.
             n = int(2 ** torch.randint(1, 6, ()).item())
-            lr_, lT, span, U0, UD, ue = train.sample_unrolled(max(256, 8192 // n), fresh)
-            l_u = log_loss(unrolled(model, lr_, lT, span, U0, n), UD, ue)
-            loss = loss + unroll * l_u
+            b = UNROLL_BATCH if UNROLL_BATCH else max(256, 8192 // n)
+            lr_, lT, span, U0, UD, ue = train.sample_unrolled(b, fresh)
+            l_u = log_loss(unrolled(fwd, lr_, lT, span, U0, n), UD, ue)
+            loss = loss + unroll * UNROLL_EVERY * l_u
         opt.zero_grad(set_to_none=True)
         loss.backward()
         # A batch whose loss or gradient is not finite is skipped, not allowed to poison the
